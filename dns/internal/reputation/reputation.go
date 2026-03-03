@@ -42,17 +42,32 @@ func Sync(db *gorm.DB) {
 	var sources []models.IPReputationSource
 	db.Where("enabled = ?", true).Find(&sources)
 	for _, src := range sources {
-		log.Printf("reputation: syncing %s", src.Name)
-		ips, cidrs := fetchList(src.URL, src.Format)
-		for _, ip := range ips {
-			db.Where(models.IPReputationEntry{IP: ip, Source: src.Name}).Assign(models.IPReputationEntry{UpdatedAt: time.Now()}).FirstOrCreate(&models.IPReputationEntry{IP: ip, Source: src.Name})
-		}
-		for _, cidr := range cidrs {
-			db.Where(models.IPReputationEntry{CIDR: cidr, Source: src.Name}).Assign(models.IPReputationEntry{UpdatedAt: time.Now()}).FirstOrCreate(&models.IPReputationEntry{CIDR: cidr, Source: src.Name})
-		}
-		now := time.Now()
-		db.Model(&src).Updates(map[string]interface{}{"last_run_at": &now, "last_count": len(ips) + len(cidrs)})
+		SyncSource(db, &src)
 	}
+}
+
+// SyncSource updates a single reputation source.
+func SyncSource(db *gorm.DB, src *models.IPReputationSource) {
+	log.Printf("reputation: syncing %s", src.Name)
+	ips, cidrs := fetchList(src.URL, src.Format)
+
+	// Update or create entries
+	for _, ip := range ips {
+		db.Where(models.IPReputationEntry{IP: ip, Source: src.Name}).
+			Assign(models.IPReputationEntry{UpdatedAt: time.Now()}).
+			FirstOrCreate(&models.IPReputationEntry{IP: ip, Source: src.Name})
+	}
+	for _, cidr := range cidrs {
+		db.Where(models.IPReputationEntry{CIDR: cidr, Source: src.Name}).
+			Assign(models.IPReputationEntry{UpdatedAt: time.Now()}).
+			FirstOrCreate(&models.IPReputationEntry{CIDR: cidr, Source: src.Name})
+	}
+
+	now := time.Now()
+	db.Model(src).Updates(map[string]interface{}{
+		"last_run_at": &now,
+		"last_count":  len(ips) + len(cidrs),
+	})
 }
 
 // fetchList downloads and parses a reputation list.

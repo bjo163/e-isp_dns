@@ -8,10 +8,10 @@ import {
   Save, RefreshCw, AlertTriangle, CheckCircle2, XCircle, Eye, EyeOff,
   ChevronRight, ChevronLeft, Server, LogOut, KeyRound, Download,
   Users, Tags, FileText, Search, BarChart3, CalendarClock, Activity,
-  Database, Lock, ListFilter, Layers, Network, ShieldCheck,
+  Database, Lock, ListFilter, Layers, Network, ShieldCheck, ShieldAlert, Paintbrush, Info,
 } from "lucide-react";
 import {
-  getBranding, updateBranding, getDomains, addDomain, deleteDomain,
+  getBranding, updateBranding, getDomains, addDomain, deleteDomain, bulkDeleteDomains,
   getDNSConfig, updateDNSConfig, updateDomain, importDomains, changePassword,
   getToken, clearToken,
   getCategories, addCategory, deleteCategory,
@@ -19,14 +19,19 @@ import {
   getRecords, addRecord, updateRecord, deleteRecord,
   getPresets, getClientStats,
   getWhitelist, addWhitelist, deleteWhitelist,
+  exportDomainsURL, getIPInfo,
   type Branding, type BlockedDomain, type DNSConfig, type NewDomain, type ImportResult,
   type Category, type ACLClient, type DetectedClient,
   type CustomRecord, type BlocklistPreset, type ClientStat, type WhitelistedDomain,
+  type IPEnrichment,
 } from "@/lib/api-client";
 import { LiveMetrics } from "@/components/sections/LiveMetrics";
+import { AnalyticsTab } from "@/components/tabs/AnalyticsTab";
+import { BrandingTab } from "@/components/tabs/BrandingTab";
 import { BlocklistsTab } from "@/components/tabs/BlocklistsTab";
 import { AccessControlTab } from "@/components/tabs/AccessControlTab";
 import { QueryLogTab } from "@/components/tabs/QueryLogTab";
+import { ReputationTab } from "@/components/tabs/ReputationTab";
 import { BlockPageTab } from "@/components/tabs/BlockPageTab";
 import { SettingsTab } from "@/components/tabs/SettingsTab";
 import { SubscriptionsTab } from "@/components/sections/SubscriptionsTab";
@@ -36,7 +41,7 @@ type Toast = { id: number; msg: string; type: "ok" | "err" };
 let _tid = 0;
 
 //  Tabs (refactored)
-type Tab = "overview" | "blocklists" | "querylog" | "blockpage" | "domains" | "records" | "subscriptions" | "categories" | "clients" | "dns" | "security" | "whitelist";
+type Tab = "overview" | "blocklists" | "querylog" | "blockpage" | "domains" | "records" | "subscriptions" | "categories" | "clients" | "dns" | "security" | "whitelist" | "analytics" | "branding" | "reputation";
 
 type TabItem = { id: Tab; label: string; icon: React.ReactNode };
 type TabGroup = { section: string; items: TabItem[] };
@@ -46,6 +51,7 @@ const TAB_GROUPS: TabGroup[] = [
     section: "Monitoring",
     items: [
       { id: "overview", label: "Overview", icon: <Radio className="w-3.5 h-3.5" /> },
+      { id: "analytics", label: "Analytics", icon: <BarChart3 className="w-3.5 h-3.5" /> },
       { id: "querylog", label: "Query Log", icon: <FileText className="w-3.5 h-3.5" /> },
     ],
   },
@@ -71,6 +77,8 @@ const TAB_GROUPS: TabGroup[] = [
     section: "System",
     items: [
       { id: "blockpage", label: "Block Page", icon: <Shield className="w-3.5 h-3.5" /> },
+      { id: "reputation", label: "IP Reputation", icon: <ShieldAlert className="w-3.5 h-3.5" /> },
+      { id: "branding", label: "Branding", icon: <Paintbrush className="w-3.5 h-3.5" /> },
       { id: "security", label: "Keamanan", icon: <Lock className="w-3.5 h-3.5" /> },
     ],
   },
@@ -190,6 +198,7 @@ export default function AdminPage() {
   const [domainPage, setDomainPage] = useState(1);
   const [domainSearch, setDomainSearch] = useState("");
   const [domainCatFilter, setDomainCatFilter] = useState("");
+  const [selectedDomains, setSelectedDomains] = useState<Set<number>>(new Set());
   const DOMAIN_LIMIT = 50;
 
   // Categories
@@ -352,6 +361,19 @@ export default function AdminPage() {
       toast(`Domain ${domain} dihapus`);
       loadDomains();
     } catch (e: unknown) { toast((e as Error).message, "err"); }
+  }
+
+  async function handleBulkDelete() {
+    const ids = Array.from(selectedDomains);
+    if (!window.confirm(`Hapus ${ids.length} domain terpilih?`)) return;
+    try {
+      setSaving(true);
+      const res = await bulkDeleteDomains(ids);
+      toast(`${res.deleted} domain berhasil dihapus`);
+      setSelectedDomains(new Set());
+      loadDomains();
+    } catch (e: unknown) { toast((e as Error).message, "err"); }
+    finally { setSaving(false); }
   }
 
   async function toggleDomain(d: BlockedDomain) {
@@ -589,6 +611,9 @@ export default function AdminPage() {
                 </div>
               )}
 
+              {/* ANALYTICS */}
+              {tab === "analytics" && <AnalyticsTab />}
+
               {/* BLOCKLISTS */}
               {tab === "blocklists" && <BlocklistsTab />}
 
@@ -663,19 +688,20 @@ export default function AdminPage() {
               {/* BLOCK PAGE */}
               {tab === "blockpage" && <BlockPageTab />}
 
+              {/* REPUTATION */}
+              {tab === "reputation" && <ReputationTab />}
+
               {/* SETTINGS — merged into DNS Config tab, removed standalone */}
 
-              {/* Branding tab removed: not present in TABS */}
-
-              {/*  ISP CONFIG  */}
-              {/* ISP tab removed: not present in TABS */}
+              {/* BRANDING */}
+              {tab === "branding" && <BrandingTab />}
 
               {/*  BLOCKED DOMAINS (PAGINATED)  */}
               {tab === "domains" && (
                 <div className="max-w-4xl space-y-6">
                   <SectionTitle title="Blokir Domain" sub={`${domainTotal.toLocaleString()} domain terdaftar`} />
 
-                  {/* Search & Filter bar */}
+                  {/* Search & Filter bar + Export */}
                   <div className="flex flex-wrap items-center gap-3">
                     <div className="relative flex-1 min-w-[200px]">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "var(--brand-muted)" }} />
@@ -690,6 +716,29 @@ export default function AdminPage() {
                       <option value="">Semua Kategori</option>
                       {categories.map(c => <option key={c.id} value={c.name}>{c.name} ({c.domain_count})</option>)}
                     </select>
+
+                    {selectedDomains.size > 0 && (
+                      <button onClick={handleBulkDelete} className="flex items-center gap-2 px-3 py-2 text-xs font-bold tracking-widest uppercase border border-red-500/50 bg-red-500/10 text-red-400 rounded hover:bg-red-500/20 transition-all">
+                        <Trash2 className="w-3.5 h-3.5" /> Hapus Massal ({selectedDomains.size})
+                      </button>
+                    )}
+
+                    <div className="relative group">
+                      <button type="button"
+                        className="flex items-center gap-2 px-3 py-2 text-xs font-bold tracking-widest uppercase border rounded transition-all"
+                        style={{ color: "var(--brand-muted)", borderColor: "var(--brand-border)" }}>
+                        <Download className="w-3.5 h-3.5" /> Export
+                      </button>
+                      <div className="absolute right-0 mt-1 w-40 border rounded py-1 hidden group-hover:block z-10"
+                        style={{ borderColor: "var(--brand-border)", background: "var(--brand-card-bg)" }}>
+                        {(["csv", "json", "hosts", "domains"] as const).map(fmt => (
+                          <a key={fmt} href={exportDomainsURL(fmt)} target="_blank" rel="noreferrer"
+                            className="block px-3 py-1.5 text-xs hover:bg-white/5 transition-colors font-mono uppercase">
+                            {fmt}
+                          </a>
+                        ))}
+                      </div>
+                    </div>
                   </div>
 
                   {/* Add single domain */}
@@ -785,9 +834,23 @@ export default function AdminPage() {
 
                   {/* Domains table */}
                   <div className="border rounded overflow-hidden" style={{ borderColor: "var(--brand-border)" }}>
-                    <div className="grid grid-cols-12 px-4 py-2 border-b text-[9px] font-bold tracking-[0.15em] uppercase"
+                    <div className="grid grid-cols-12 px-4 py-2 border-b text-[9px] font-bold tracking-[0.15em] uppercase items-center"
                       style={{ borderColor: "var(--brand-border)", color: "var(--brand-muted)", background: "var(--brand-card-bg)" }}>
-                      <div className="col-span-1">Status</div>
+                      <div className="col-span-1 flex items-center">
+                        <input type="checkbox" className="mr-3 accent-red-500 cursor-pointer"
+                          checked={domains.length > 0 && domains.every(d => selectedDomains.has(d.id))}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedDomains(new Set([...selectedDomains, ...domains.map(d => d.id)]));
+                            } else {
+                              const next = new Set(selectedDomains);
+                              domains.forEach(d => next.delete(d.id));
+                              setSelectedDomains(next);
+                            }
+                          }}
+                        />
+                        Status
+                      </div>
                       <div className="col-span-4">Domain</div>
                       <div className="col-span-3">Kategori</div>
                       <div className="col-span-3">Alasan</div>
@@ -798,9 +861,18 @@ export default function AdminPage() {
                         {domainSearch || domainCatFilter ? "Tidak ada domain yang cocok" : "Belum ada domain yang diblokir"}
                       </div>
                     ) : domains.map(d => (
-                      <div key={d.id} className="grid grid-cols-12 px-4 py-3 border-b last:border-0 items-center hover:bg-white/[0.02]"
+                      <div key={d.id} className={`grid grid-cols-12 px-4 py-3 border-b last:border-0 items-center transition-colors ${selectedDomains.has(d.id) ? 'bg-red-500/5' : 'hover:bg-white/[0.02]'}`}
                         style={{ borderColor: "var(--brand-border)" }}>
-                        <div className="col-span-1">
+                        <div className="col-span-1 flex items-center">
+                          <input type="checkbox" className="mr-3 accent-red-500 cursor-pointer"
+                            checked={selectedDomains.has(d.id)}
+                            onChange={() => {
+                              const next = new Set(selectedDomains);
+                              if (next.has(d.id)) next.delete(d.id);
+                              else next.add(d.id);
+                              setSelectedDomains(next);
+                            }}
+                          />
                           <button onClick={() => toggleDomain(d)} title={d.active ? "Nonaktifkan" : "Aktifkan"}>
                             {d.active
                               ? <Eye className="w-3.5 h-3.5 text-green-400" />
@@ -1241,6 +1313,7 @@ export default function AdminPage() {
                     <Field label="Upstream DNS" value={dnsConfig.upstream_dns} onChange={v => setDnsConfig(c => c && { ...c, upstream_dns: v })} mono />
                     <Field label="Redirect IP" value={dnsConfig.redirect_ip} onChange={v => setDnsConfig(c => c && { ...c, redirect_ip: v })} mono />
                     <Field label="Admin API Port" value={dnsConfig.http_port} onChange={v => setDnsConfig(c => c && { ...c, http_port: v })} mono />
+                    <Field label="Intercept Port" value={dnsConfig.intercept_port ?? ""} onChange={v => setDnsConfig(c => c && { ...c, intercept_port: v })} mono />
                   </div>
 
                   {/* ACL Default Toggle */}

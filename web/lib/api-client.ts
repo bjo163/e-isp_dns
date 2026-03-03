@@ -80,7 +80,7 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
 
 //  Auth 
 export const login = (username: string, password: string) =>
-  req<{ token: string; username: string }>("/api/auth/login", {
+  req<{ token: string; username: string; must_change_password: boolean }>("/api/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
@@ -179,6 +179,19 @@ export interface WhitelistedDomain { id: number; domain: string; reason: string;
 export const getWhitelist = () => req<WhitelistedDomain[]>("/api/whitelist");
 export const addWhitelist = (d: { domain: string; reason: string }) => req<WhitelistedDomain>("/api/whitelist", { method: "POST", body: JSON.stringify(d) });
 export const deleteWhitelist = (id: number) => req<void>(`/api/whitelist/${id}`, { method: "DELETE" });
+
+//  IP Reputation
+export const getReputationSources = () => req<IPReputationSource[]>("/api/reputation/sources");
+export const addReputationSource = (s: Partial<IPReputationSource>) => req<IPReputationSource>("/api/reputation/sources", { method: "POST", body: JSON.stringify(s) });
+export const syncReputationSource = (id: number) => req<void>(`/api/reputation/sources/${id}/sync`, { method: "POST" });
+export const deleteReputationSource = (id: number) => req<void>(`/api/reputation/sources/${id}`, { method: "DELETE" });
+export const getReputationEntries = (params?: { page?: number; limit?: number; search?: string }) => {
+  const p = new URLSearchParams();
+  if (params?.page) p.set("page", String(params.page));
+  if (params?.limit) p.set("limit", String(params.limit));
+  if (params?.search) p.set("search", params.search);
+  return req<PaginatedResponse<IPReputationEntry>>(`/api/reputation/entries?${p.toString()}`);
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -345,4 +358,24 @@ export interface BlocklistSubscription {
   last_count: number;
   last_error: string;
   created_at?: string;
+}
+
+export interface IPReputationSource {
+  id: number;
+  name: string;
+  url: string;
+  format: string; // ip, cidr, mixed
+  enabled: boolean;
+  last_run_at: string | null;
+  last_count: number;
+  created_at?: string;
+}
+
+export interface IPReputationEntry {
+  id: number;
+  ip: string;
+  cidr: string;
+  source: string;
+  reason: string;
+  updated_at: string;
 }
