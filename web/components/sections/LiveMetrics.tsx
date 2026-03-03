@@ -149,7 +149,7 @@ export function LiveMetrics() {
   const [online, setOnline] = useState(true);
 
   useEffect(() => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
     let active = true;
 
     const poll = async () => {

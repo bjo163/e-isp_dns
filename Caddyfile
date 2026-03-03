@@ -26,9 +26,7 @@
 	# Subscriber browser arrives here because DNS returned our IP for the
 	# blocked site. Go intercept reads Host header → 302 to block page.
 	reverse_proxy 127.0.0.1:8081 {
-		header_up X-Real-IP        {remote_host}
-		header_up X-Forwarded-For  {remote_host}
-		header_up X-Forwarded-Host {host}
+		header_up X-Real-IP {remote_host}
 	}
 }
 
@@ -37,15 +35,12 @@
 	# Go API routes → Fiber :8080
 	handle /api/* {
 		reverse_proxy 127.0.0.1:8080 {
-			header_up X-Real-IP        {remote_host}
-			header_up X-Forwarded-For  {remote_host}
-			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP {remote_host}
 		}
 	}
 	handle /myip {
 		reverse_proxy 127.0.0.1:8080 {
-			header_up X-Real-IP        {remote_host}
-			header_up X-Forwarded-For  {remote_host}
+			header_up X-Real-IP {remote_host}
 		}
 	}
 	handle /metrics {
@@ -58,9 +53,7 @@
 	# Everything else → Next.js :3000
 	handle {
 		reverse_proxy 127.0.0.1:3000 {
-			header_up X-Real-IP        {remote_host}
-			header_up X-Forwarded-For  {remote_host}
-			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP {remote_host}
 		}
 	}
 

@@ -1,4 +1,4 @@
-﻿const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+﻿const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 //  Token helpers (browser only) 
 export const getToken  = () => (typeof window !== "undefined" ? localStorage.getItem("admin_token") : null);

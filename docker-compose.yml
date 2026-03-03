@@ -49,6 +49,7 @@ services:
     environment:
       - REDIS_URL=redis://127.0.0.1:6379/0
       - JWT_SECRET=${JWT_SECRET:-trustpositif-secret-change-in-prod}
+      - BLOCK_PAGE_URL=${BLOCK_PAGE_URL:-https://${DOMAIN:-jahanam.mycocolink.com}}
     depends_on:
       redis:
         condition: service_healthy
@@ -65,7 +66,8 @@ services:
       context: ./web
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${API_URL:-https://${DOMAIN:-jahanam.mycocolink.com}}
+        # Empty = same-origin relative URLs (Caddy path-based routing)
+        NEXT_PUBLIC_API_URL: ""
     container_name: truspositif-web
     restart: unless-stopped
     network_mode: host

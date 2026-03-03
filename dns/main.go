@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"log"
+	"os"
 
 	"github.com/truspositif/dns/internal/api"
 	"github.com/truspositif/dns/internal/db"
@@ -29,6 +30,11 @@ func main() {
 	blockPageURL := ""
 	if err := db.DB.First(&branding, 1).Error; err == nil {
 		blockPageURL = branding.BlockPageURL
+	}
+	// Environment override — allows docker-compose to inject the real URL
+	// without having to update the DB.
+	if env := os.Getenv("BLOCK_PAGE_URL"); env != "" {
+		blockPageURL = env
 	}
 
 	// 4. Start Fiber HTTP admin API (non-blocking)

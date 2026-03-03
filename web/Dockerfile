@@ -20,7 +20,9 @@ COPY . .
 
 # NEXT_PUBLIC_* vars must be present at build time.
 # Pass the public API URL via build arg so it gets baked into the JS bundle.
-ARG NEXT_PUBLIC_API_URL=http://localhost:8080
+# In production (same-origin behind Caddy), leave empty for relative URLs.
+# For split-domain setups pass the full URL at build time.
+ARG NEXT_PUBLIC_API_URL=""
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 RUN pnpm build

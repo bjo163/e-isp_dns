@@ -32,7 +32,7 @@ export function HeroSection({ blockedDomain, reason, category }: HeroProps) {
 
   const [userIp, setUserIp] = useState<string>("—");
   useEffect(() => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
     fetch(`${apiUrl}/myip`)
       .then((r) => r.json())
       .then((d) => setUserIp(d.ip ?? "unknown"))
