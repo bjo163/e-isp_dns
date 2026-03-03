@@ -59,8 +59,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    cap_add:
-      - NET_BIND_SERVICE
+    # NOTE: cap_add NET_BIND_SERVICE removed — not supported in LXC.
+    # Container runs as root internally, so binding :53 works without it.
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
       interval: 15s
