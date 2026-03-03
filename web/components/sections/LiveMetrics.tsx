@@ -21,6 +21,7 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
+import { getToken } from "@/lib/api-client";
 
 /* ─── types matching Go WsPayload ─── */
 
@@ -216,9 +217,9 @@ export function LiveMetrics({ compact = false }: { compact?: boolean }) {
     // If API URL is relative (starts with / or is empty), use current host
     let wsUrl: string;
     if (base.startsWith("http")) {
-      wsUrl = base.replace(/^http/, "ws") + "/ws/metrics";
+      wsUrl = base.replace(/^http/, "ws") + `/ws/metrics?token=${encodeURIComponent(getToken() ?? "")}`;
     } else {
-      wsUrl = `${proto}//${window.location.host}${base}/ws/metrics`;
+      wsUrl = `${proto}//${window.location.host}${base}/ws/metrics?token=${encodeURIComponent(getToken() ?? "")}`;
     }
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;

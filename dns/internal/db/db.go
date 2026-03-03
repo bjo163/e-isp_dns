@@ -43,6 +43,10 @@ if err := DB.AutoMigrate(
 ); err != nil {
 log.Fatalf("db: auto-migrate failed: %v", err)
 }
+// Enable WAL mode: allows concurrent reads during writes, critical for DNS+analytics workload.
+if err := DB.Exec("PRAGMA journal_mode=WAL").Error; err != nil {
+	log.Printf("db: warning: failed to enable WAL mode: %v", err)
+}
 seed(DB)
 // Warm the two-layer domain cache (Redis L2 + sync.Map L1).
 cache.InitFromEnv(DB)

@@ -166,10 +166,10 @@ type QueryLogEntry struct {
 ID        uint      `gorm:"primaryKey" json:"id"`
 Domain    string    `gorm:"index;not null" json:"domain"`
 QType     string    `json:"qtype"`
-Action    string    `gorm:"index;not null" json:"action"` // blocked, forwarded, custom, acl_blocked
+Action    string    `gorm:"not null;index:idx_qle_action_created" json:"action"` // composite index col1
 Client    string    `gorm:"index" json:"client"`
 LatencyUs int64     `json:"latency_us"`
-CreatedAt time.Time `gorm:"index;not null" json:"created_at"`
+CreatedAt time.Time `gorm:"not null;index:idx_qle_action_created" json:"created_at"` // composite index col2
 }
 
 // BlocklistSubscription is a scheduled blocklist import (auto-cron).

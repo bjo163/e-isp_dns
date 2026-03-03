@@ -9,6 +9,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/websocket/v2"
 	"github.com/truspositif/dns/internal/analytics"
@@ -35,7 +36,13 @@ func New() *fiber.App {
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
-	app.Post("/api/auth/login", handleLogin)
+	app.Post("/api/auth/login", limiter.New(limiter.Config{
+		Max:        10,
+		Expiration: time.Minute,
+		LimitReached: func(c *fiber.Ctx) error {
+			return c.Status(429).JSON(fiber.Map{"error": "terlalu banyak percobaan login, coba lagi nanti"})
+		},
+	}), handleLogin)
 
 	app.Get("/myip", func(c *fiber.Ctx) error {
 		ip := c.Get("X-Real-IP")
@@ -50,12 +57,12 @@ func New() *fiber.App {
 		return c.JSON(fiber.Map{"ip": ip})
 	})
 
-	app.Get("/metrics", func(c *fiber.Ctx) error {
+	app.Get("/metrics", auth.Middleware(), func(c *fiber.Ctx) error {
 		return c.JSON(metrics.Snapshot())
 	})
 
-	// WebSocket — real-time metrics
-	app.Use("/ws/metrics", func(c *fiber.Ctx) error {
+	// WebSocket — real-time metrics (auth via ?token= query param)
+	app.Use("/ws/metrics", auth.Middleware(), func(c *fiber.Ctx) error {
 		if websocket.IsWebSocketUpgrade(c) {
 			return c.Next()
 		}

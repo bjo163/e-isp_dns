@@ -6,14 +6,38 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/truspositif/dns/internal/cache"
 	"github.com/truspositif/dns/internal/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// httpClient has a hard 30-second timeout to prevent goroutine leaks.
+var httpClient = &http.Client{Timeout: 30 * time.Second}
+
+// validateURL rejects non-http(s) schemes and RFC-1918/loopback targets (SSRF guard).
+func validateURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("URL tidak valid: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("hanya skema http/https yang diizinkan")
+	}
+	host := u.Hostname()
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+			return fmt.Errorf("IP loopback/private tidak diizinkan")
+		}
+	}
+	return nil
+}
 
 // Result describes the outcome of an import operation.
 type Result struct {
@@ -25,7 +49,10 @@ type Result struct {
 // FromURL downloads a blocklist from url, parses it, and upserts domains
 // into the database with the given category and reason.
 func FromURL(db *gorm.DB, url, category, reason string) (Result, error) {
-	resp, err := http.Get(url)
+	if err := validateURL(url); err != nil {
+		return Result{}, err
+	}
+	resp, err := httpClient.Get(url)
 	if err != nil {
 		return Result{}, fmt.Errorf("gagal mengunduh: %w", err)
 	}
