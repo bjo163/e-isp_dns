@@ -6,9 +6,11 @@ import (
 	"os"
 
 	"github.com/truspositif/dns/internal/api"
+	"github.com/truspositif/dns/internal/cache"
 	"github.com/truspositif/dns/internal/db"
 	"github.com/truspositif/dns/internal/dns"
 	"github.com/truspositif/dns/internal/intercept"
+	"github.com/truspositif/dns/internal/metrics"
 	"github.com/truspositif/dns/internal/models"
 )
 
@@ -37,7 +39,14 @@ func main() {
 		blockPageURL = env
 	}
 
-	// 4. Start Fiber HTTP admin API (non-blocking)
+	// 4. Apply ACL default policy from config
+	cache.SetACLDefault(cfg.ACLDefaultAllow)
+
+	// 5. Start metrics sampler (1-sec ring buffer) + WebSocket hub
+	metrics.StartSampler()
+	metrics.RunHub()
+
+	// 5. Start Fiber HTTP admin API (non-blocking)
 	app := api.New()
 	go func() {
 		addr := ":" + cfg.HTTPPort
@@ -47,12 +56,12 @@ func main() {
 		}
 	}()
 
-	// 5. Start HTTP intercept server on :80 — redirects blocked requests
+	// 6. Start HTTP intercept server on :80 — redirects blocked requests
 	//    from the browser to the block page with domain/reason/cat params.
 	intSrv := intercept.New(":"+cfg.InterceptPort, blockPageURL)
 	go intSrv.Start()
 
-	// 6. Start DNS server (blocks)
+	// 7. Start DNS server (blocks)
 	srv := dns.New(cfg.ListenAddr, cfg.UpstreamDNS, cfg.RedirectIP)
 	srv.Start()
 }

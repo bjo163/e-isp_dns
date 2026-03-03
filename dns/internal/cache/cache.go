@@ -1,13 +1,14 @@
 // Package cache provides a two-layer domain blocklist cache for production-grade
-// DNS performance.
+// DNS performance, plus ACL and custom DNS record caches.
 //
 //   L1 — sync.RWMutex + map[string]struct{} (in-process, zero-allocation lookup)
 //   L2 — Redis SET  (shared across replicas; ~0.1 ms round-trip)
 //   L3 — SQLite     (source of truth, queried only on cold-start & cache miss)
 //
+// ACL cache: map[string]string — IP → "allow" or "block"
+// Records cache: map[recordKey][]recordVal — custom DNS records (A, AAAA, etc.)
+//
 // Throughput: a single Go process can answer >100 k DNS queries/sec with L1 alone.
-// Redis allows multiple instances (e.g. primary + standby) to share the same
-// blocklist without each hitting SQLite.
 package cache
 
 import (
@@ -42,12 +43,36 @@ var (
 	// metaCache caches reason/category for recently blocked domains.
 	metaCache   map[string][2]string // domain → [reason, category]
 	metaCacheMu sync.RWMutex
+
+	// ACL cache: client IP → action ("allow" / "block")
+	aclCache   map[string]string
+	aclMu      sync.RWMutex
+	aclDefault = true // true = allow all by default
+
+	// Custom DNS records cache
+	recCache   map[recordKey][]RecordVal
+	recMu      sync.RWMutex
 )
+
+// recordKey is domain+type for custom record lookup.
+type recordKey struct {
+	Name string // lowercase FQDN without trailing dot
+	Type string // "A", "AAAA", "CNAME", "MX", "TXT", "PTR", "NS", "SRV"
+}
+
+// RecordVal holds a single custom DNS record value.
+type RecordVal struct {
+	Value    string
+	TTL      uint32
+	Priority uint16
+}
 
 // Init connects to Redis and warms the L1 cache from the DB.
 // redisURL may be empty — in that case only L1 (in-process) is used.
 func Init(redisURL string, dbConn *gorm.DB) {
 	metaCache = make(map[string][2]string)
+	aclCache = make(map[string]string)
+	recCache = make(map[recordKey][]RecordVal)
 
 	if redisURL != "" {
 		opt, err := redis.ParseURL(redisURL)
@@ -67,6 +92,8 @@ func Init(redisURL string, dbConn *gorm.DB) {
 	}
 
 	Reload(dbConn)
+	ReloadACL(dbConn)
+	ReloadRecords(dbConn)
 }
 
 // InitFromEnv reads REDIS_URL from the environment.
@@ -189,4 +216,82 @@ func nextParent(d string) string {
 		return ""
 	}
 	return d[idx+1:]
+}
+
+// ── ACL Cache ────────────────────────────────────────────────────────────────
+
+// SetACLDefault sets the default policy (true = allow, false = block).
+func SetACLDefault(allow bool) {
+	aclMu.Lock()
+	aclDefault = allow
+	aclMu.Unlock()
+}
+
+// ReloadACL rebuilds the ACL cache from the database.
+func ReloadACL(dbConn *gorm.DB) {
+	type row struct {
+		IP     string
+		Action string
+	}
+	var rows []row
+	dbConn.Raw("SELECT ip, action FROM acl_clients").Scan(&rows)
+
+	newACL := make(map[string]string, len(rows))
+	for _, r := range rows {
+		newACL[r.IP] = r.Action
+	}
+	aclMu.Lock()
+	aclCache = newACL
+	aclMu.Unlock()
+	log.Printf("cache: loaded %d ACL entries", len(rows))
+}
+
+// IsClientAllowed checks if a client IP is allowed to browse (bypass blocking).
+// Default-allow mode: unknown IPs are allowed; only explicit "block" entries block.
+// Default-block mode: unknown IPs are blocked; only explicit "allow" entries pass.
+func IsClientAllowed(clientIP string) bool {
+	aclMu.RLock()
+	action, found := aclCache[clientIP]
+	def := aclDefault
+	aclMu.RUnlock()
+
+	if !found {
+		return def // default policy
+	}
+	return action == "allow"
+}
+
+// ── Custom DNS Records Cache ─────────────────────────────────────────────────
+
+// ReloadRecords rebuilds the custom DNS records cache from the database.
+func ReloadRecords(dbConn *gorm.DB) {
+	type row struct {
+		Name     string
+		Type     string
+		Value    string
+		TTL      uint32
+		Priority uint16
+	}
+	var rows []row
+	dbConn.Raw("SELECT name, type, value, ttl, priority FROM custom_records WHERE active = true").Scan(&rows)
+
+	newRec := make(map[recordKey][]RecordVal, len(rows))
+	for _, r := range rows {
+		k := recordKey{Name: strings.ToLower(r.Name), Type: strings.ToUpper(r.Type)}
+		newRec[k] = append(newRec[k], RecordVal{Value: r.Value, TTL: r.TTL, Priority: r.Priority})
+	}
+	recMu.Lock()
+	recCache = newRec
+	recMu.Unlock()
+	log.Printf("cache: loaded %d custom DNS records", len(rows))
+}
+
+// LookupRecords returns custom DNS records for a domain+type.
+// Returns nil if no records found — caller should fall through to upstream.
+func LookupRecords(domain, qtype string) []RecordVal {
+	k := recordKey{Name: strings.ToLower(domain), Type: strings.ToUpper(qtype)}
+	recMu.RLock()
+	vals := recCache[k]
+	recMu.RUnlock()
+	return vals
 }

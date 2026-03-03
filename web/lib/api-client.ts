@@ -45,11 +45,20 @@ export const changePassword = (current_password: string, new_password: string) =
 export const getBranding    = ()             => req<Branding>("/api/branding");
 export const updateBranding = (b: Branding) => req<Branding>("/api/branding", { method: "PUT", body: JSON.stringify(b) });
 
-//  Blocked Domains 
-export const getDomains   = ()                                          => req<BlockedDomain[]>("/api/domains");
+//  Blocked Domains (paginated) 
+export const getDomains = (params?: { page?: number; limit?: number; search?: string; category?: string; active?: string }) => {
+  const p = new URLSearchParams();
+  if (params?.page) p.set("page", String(params.page));
+  if (params?.limit) p.set("limit", String(params.limit));
+  if (params?.search) p.set("search", params.search);
+  if (params?.category) p.set("category", params.category);
+  if (params?.active) p.set("active", params.active);
+  return req<PaginatedResponse<BlockedDomain>>(`/api/domains?${p.toString()}`);
+};
 export const addDomain    = (d: NewDomain)                              => req<BlockedDomain>("/api/domains", { method: "POST", body: JSON.stringify(d) });
 export const updateDomain = (id: number, d: Partial<BlockedDomain>)    => req<BlockedDomain>(`/api/domains/${id}`, { method: "PUT", body: JSON.stringify(d) });
 export const deleteDomain = (id: number)                                => req<void>(`/api/domains/${id}`, { method: "DELETE" });
+export const bulkDeleteDomains = (ids: number[]) => req<{ deleted: number }>("/api/domains/bulk", { method: "DELETE", body: JSON.stringify({ ids }) });
 
 export const importDomains = (url: string, category: string, reason: string) =>
   req<ImportResult>("/api/domains/import", {
@@ -57,45 +66,68 @@ export const importDomains = (url: string, category: string, reason: string) =>
     body: JSON.stringify({ url, category, reason }),
   });
 
+//  Categories 
+export const getCategories   = ()                                 => req<Category[]>("/api/categories");
+export const addCategory     = (c: Partial<Category>)             => req<Category>("/api/categories", { method: "POST", body: JSON.stringify(c) });
+export const updateCategory  = (id: number, c: Partial<Category>) => req<Category>(`/api/categories/${id}`, { method: "PUT", body: JSON.stringify(c) });
+export const deleteCategory  = (id: number)                        => req<void>(`/api/categories/${id}`, { method: "DELETE" });
+
+//  ACL Clients 
+export const getClients       = ()                                    => req<ACLClient[]>("/api/clients");
+export const getDetectedClients = ()                                  => req<DetectedClient[]>("/api/clients/detected");
+export const addClient        = (c: Partial<ACLClient>)               => req<ACLClient>("/api/clients", { method: "POST", body: JSON.stringify(c) });
+export const updateClient     = (id: number, c: Partial<ACLClient>)   => req<ACLClient>(`/api/clients/${id}`, { method: "PUT", body: JSON.stringify(c) });
+export const deleteClient     = (id: number)                           => req<void>(`/api/clients/${id}`, { method: "DELETE" });
+
+//  Custom DNS Records (paginated) 
+export const getRecords = (params?: { page?: number; limit?: number; search?: string; type?: string }) => {
+  const p = new URLSearchParams();
+  if (params?.page) p.set("page", String(params.page));
+  if (params?.limit) p.set("limit", String(params.limit));
+  if (params?.search) p.set("search", params.search);
+  if (params?.type) p.set("type", params.type);
+  return req<PaginatedResponse<CustomRecord>>(`/api/records?${p.toString()}`);
+};
+export const addRecord    = (r: Partial<CustomRecord>)              => req<CustomRecord>("/api/records", { method: "POST", body: JSON.stringify(r) });
+export const updateRecord = (id: number, r: Partial<CustomRecord>) => req<CustomRecord>(`/api/records/${id}`, { method: "PUT", body: JSON.stringify(r) });
+export const deleteRecord = (id: number)                            => req<void>(`/api/records/${id}`, { method: "DELETE" });
+
+//  Blocklist Presets 
+export const getPresets = () => req<BlocklistPreset[]>("/api/presets");
+
 //  DNS Config 
 export const getDNSConfig    = ()              => req<DNSConfig>("/api/config");
 export const updateDNSConfig = (c: DNSConfig) => req<DNSConfig>("/api/config", { method: "PUT", body: JSON.stringify(c) });
 
-// 
+// ─────────────────────────────────────────────────────────────────────────────
 // Types
-// 
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  total: number;
+  page: number;
+  limit: number;
+}
 
 export interface Branding {
-  // Umum
   site_name: string;
   block_page_url: string;
-
-  // Hero / copy teks halaman block
   hero_title: string;
   hero_subtitle: string;
   warning_badge_text: string;
   blocked_url_placeholder: string;
   default_reason: string;
   notice_text: string;
-
-  // Section  Kategori
   category_title: string;
   category_subtitle: string;
-
-  // Section  Banding
   appeal_title: string;
   appeal_subtitle: string;
   appeal_portal_label: string;
   appeal_process_days: number;
-
-  // Section  Kontak
   contact_title: string;
   contact_subtitle: string;
-
-  // Footer
   footer_legal: string;
-
-  // Regulator
   authority_name: string;
   authority_short_name: string;
   authority_logo: string;
@@ -104,8 +136,6 @@ export interface Branding {
   authority_email: string;
   authority_website: string;
   trustpositif_url: string;
-
-  // ISP
   isp_name: string;
   isp_short_name: string;
   isp_logo: string;
@@ -113,18 +143,13 @@ export interface Branding {
   isp_email: string;
   isp_website: string;
   isp_as_number: string;
-
-  // Tema
   primary_color: string;
   accent_color: string;
-
-  // Aset logo resmi
   komdigi_logo: string;
   cyber_drone9_logo: string;
   aduan_konten_logo: string;
   aduan_konten_url: string;
   cyber_drone9_url: string;
-
   updated_at?: string;
 }
 
@@ -139,11 +164,58 @@ export interface BlockedDomain {
 
 export type NewDomain = Omit<BlockedDomain, "id" | "created_at">;
 
+export interface Category {
+  id: number;
+  name: string;
+  description: string;
+  color: string;
+  icon: string;
+  active: boolean;
+  domain_count: number;
+  created_at?: string;
+}
+
+export interface ACLClient {
+  id: number;
+  ip: string;
+  name: string;
+  action: string; // "allow" | "block"
+  notes: string;
+  created_at?: string;
+}
+
+export interface DetectedClient {
+  ip: string;
+  query_count: number;
+}
+
+export interface CustomRecord {
+  id: number;
+  name: string;
+  type: string; // A, AAAA, CNAME, MX, TXT, PTR, NS, SRV
+  value: string;
+  ttl: number;
+  priority: number;
+  active: boolean;
+  notes: string;
+  created_at?: string;
+}
+
+export interface BlocklistPreset {
+  label: string;
+  url: string;
+  category: string;
+  description: string;
+  format: string;
+}
+
 export interface DNSConfig {
   listen_addr: string;
   upstream_dns: string;
   redirect_ip: string;
   http_port: string;
+  intercept_port?: string;
+  acl_default_allow: boolean;
 }
 
 export interface ImportResult {

@@ -2,32 +2,44 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
-  Shield, Settings, Globe, Radio, Wifi, Database, Plus, Trash2,
+  Shield, Globe, Radio, Wifi, Plus, Trash2,
   Save, RefreshCw, AlertTriangle, CheckCircle2, XCircle, Eye, EyeOff,
-  ChevronRight, Server, LogOut, KeyRound, Download,
+  ChevronRight, ChevronLeft, Server, LogOut, KeyRound, Download,
+  Users, Tags, FileText, Search,
 } from "lucide-react";
 import {
   getBranding, updateBranding, getDomains, addDomain, deleteDomain,
   getDNSConfig, updateDNSConfig, updateDomain, importDomains, changePassword,
   getToken, clearToken,
+  getCategories, addCategory, deleteCategory,
+  getClients, getDetectedClients, addClient, deleteClient,
+  getRecords, addRecord, updateRecord, deleteRecord,
+  getPresets,
   type Branding, type BlockedDomain, type DNSConfig, type NewDomain, type ImportResult,
+  type Category, type ACLClient, type DetectedClient,
+  type CustomRecord, type BlocklistPreset,
 } from "@/lib/api-client";
+import { LiveMetrics } from "@/components/sections/LiveMetrics";
 
 //  Toast helper 
 type Toast = { id: number; msg: string; type: "ok" | "err" };
 let _tid = 0;
 
 //  Tabs 
-type Tab = "overview" | "branding" | "isp" | "domains" | "dns" | "security";
+type Tab = "overview" | "branding" | "isp" | "domains" | "categories" | "clients" | "records" | "dns" | "security";
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: "overview",  label: "Overview",        icon: <Radio className="w-3.5 h-3.5" /> },
-  { id: "branding",  label: "Branding",         icon: <Shield className="w-3.5 h-3.5" /> },
-  { id: "isp",       label: "ISP Config",       icon: <Wifi className="w-3.5 h-3.5" /> },
-  { id: "domains",   label: "Blokir Domain",    icon: <Globe className="w-3.5 h-3.5" /> },
-  { id: "dns",       label: "DNS Config",       icon: <Server className="w-3.5 h-3.5" /> },
-  { id: "security",  label: "Keamanan",         icon: <KeyRound className="w-3.5 h-3.5" /> },
+  { id: "overview",    label: "Overview",        icon: <Radio className="w-3.5 h-3.5" /> },
+  { id: "branding",    label: "Branding",        icon: <Shield className="w-3.5 h-3.5" /> },
+  { id: "isp",         label: "ISP Config",      icon: <Wifi className="w-3.5 h-3.5" /> },
+  { id: "domains",     label: "Blokir Domain",   icon: <Globe className="w-3.5 h-3.5" /> },
+  { id: "categories",  label: "Kategori",        icon: <Tags className="w-3.5 h-3.5" /> },
+  { id: "clients",     label: "Clients / ACL",   icon: <Users className="w-3.5 h-3.5" /> },
+  { id: "records",     label: "DNS Records",     icon: <FileText className="w-3.5 h-3.5" /> },
+  { id: "dns",         label: "DNS Config",      icon: <Server className="w-3.5 h-3.5" /> },
+  { id: "security",    label: "Keamanan",        icon: <KeyRound className="w-3.5 h-3.5" /> },
 ];
 
 //  Reusable Field 
@@ -132,9 +144,37 @@ export default function AdminPage() {
 
   // Data states
   const [branding, setBranding]   = useState<Branding | null>(null);
-  const [domains, setDomains]     = useState<BlockedDomain[]>([]);
   const [dnsConfig, setDnsConfig] = useState<DNSConfig | null>(null);
   const [connected, setConnected] = useState<boolean | null>(null);
+
+  // Paginated domains
+  const [domains, setDomains]       = useState<BlockedDomain[]>([]);
+  const [domainTotal, setDomainTotal] = useState(0);
+  const [domainPage, setDomainPage] = useState(1);
+  const [domainSearch, setDomainSearch] = useState("");
+  const [domainCatFilter, setDomainCatFilter] = useState("");
+  const DOMAIN_LIMIT = 50;
+
+  // Categories
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [newCat, setNewCat] = useState({ name: "", description: "", color: "#6366f1", icon: "Globe" });
+
+  // Clients / ACL
+  const [clients, setClients] = useState<ACLClient[]>([]);
+  const [detected, setDetected] = useState<DetectedClient[]>([]);
+  const [newClient, setNewClient] = useState({ ip: "", name: "", action: "allow", notes: "" });
+
+  // Custom DNS Records (paginated)
+  const [records, setRecords]       = useState<CustomRecord[]>([]);
+  const [recordTotal, setRecordTotal] = useState(0);
+  const [recordPage, setRecordPage] = useState(1);
+  const [recordSearch, setRecordSearch] = useState("");
+  const [recordTypeFilter, setRecordTypeFilter] = useState("");
+  const RECORD_LIMIT = 50;
+  const [newRecord, setNewRecord] = useState({ name: "", type: "A", value: "", ttl: 3600, priority: 0, notes: "" });
+
+  // Presets
+  const [presets, setPresets] = useState<BlocklistPreset[]>([]);
 
   // Loading states
   const [saving, setSaving]   = useState(false);
@@ -169,22 +209,56 @@ export default function AdminPage() {
     }
   }, [router]);
 
+  // Load domains (paginated)
+  const loadDomains = useCallback(async (page?: number, search?: string, cat?: string) => {
+    try {
+      const p = page ?? domainPage;
+      const s = search ?? domainSearch;
+      const c = cat ?? domainCatFilter;
+      const res = await getDomains({ page: p, limit: DOMAIN_LIMIT, search: s || undefined, category: c || undefined });
+      setDomains(res.data);
+      setDomainTotal(res.total);
+    } catch { /* silently fail, loadAll handles connection */ }
+  }, [domainPage, domainSearch, domainCatFilter]);
+
+  // Load records (paginated)
+  const loadRecords = useCallback(async (page?: number, search?: string, type?: string) => {
+    try {
+      const p = page ?? recordPage;
+      const s = search ?? recordSearch;
+      const t = type ?? recordTypeFilter;
+      const res = await getRecords({ page: p, limit: RECORD_LIMIT, search: s || undefined, type: t || undefined });
+      setRecords(res.data);
+      setRecordTotal(res.total);
+    } catch { /* silent */ }
+  }, [recordPage, recordSearch, recordTypeFilter]);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [b, d, c] = await Promise.all([getBranding(), getDomains(), getDNSConfig()]);
+      const [b, c] = await Promise.all([getBranding(), getDNSConfig()]);
       setBranding(b);
-      setDomains(d);
       setDnsConfig(c);
       setConnected(true);
+      // Load sub-data in background
+      loadDomains(1, "", "");
+      getCategories().then(setCategories).catch(() => {});
+      getClients().then(setClients).catch(() => {});
+      getDetectedClients().then(setDetected).catch(() => {});
+      loadRecords(1, "", "");
+      getPresets().then(setPresets).catch(() => {});
     } catch {
       setConnected(false);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadDomains, loadRecords]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  // Reload domains on filter/page change
+  useEffect(() => { if (connected) loadDomains(); }, [domainPage, domainSearch, domainCatFilter, connected, loadDomains]);
+  useEffect(() => { if (connected) loadRecords(); }, [recordPage, recordSearch, recordTypeFilter, connected, loadRecords]);
 
   function handleLogout() {
     clearToken();
@@ -218,10 +292,10 @@ export default function AdminPage() {
     e.preventDefault();
     if (!newDomain.domain.trim()) return;
     try {
-      const d = await addDomain(newDomain);
-      setDomains(prev => [d, ...prev]);
+      await addDomain(newDomain);
       setNewDomain({ domain: "", reason: "", category: "", active: true });
-      toast(`Domain ${d.domain} ditambahkan`);
+      toast("Domain ditambahkan");
+      loadDomains(1, domainSearch, domainCatFilter);
     } catch (e: unknown) { toast((e as Error).message, "err"); }
   }
 
@@ -229,8 +303,8 @@ export default function AdminPage() {
     if (!window.confirm(`Hapus domain "${domain}"?`)) return;
     try {
       await deleteDomain(id);
-      setDomains(prev => prev.filter(d => d.id !== id));
       toast(`Domain ${domain} dihapus`);
+      loadDomains();
     } catch (e: unknown) { toast((e as Error).message, "err"); }
   }
 
@@ -250,9 +324,88 @@ export default function AdminPage() {
       const result = await importDomains(importUrl, importCategory, importReason);
       setImportResult(result);
       toast(`Import selesai: ${result.inserted} domain ditambahkan`);
-      loadAll();
+      loadDomains(1, "", "");
     } catch (e: unknown) { toast((e as Error).message, "err"); }
     finally { setImporting(false); }
+  }
+
+  // Category handlers
+  async function handleAddCategory(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newCat.name.trim()) return;
+    try {
+      const c = await addCategory(newCat);
+      setCategories(prev => [...prev, c]);
+      setNewCat({ name: "", description: "", color: "#6366f1", icon: "Globe" });
+      toast("Kategori ditambahkan");
+    } catch (e: unknown) { toast((e as Error).message, "err"); }
+  }
+
+  async function handleDeleteCategory(id: number, name: string) {
+    if (!window.confirm(`Hapus kategori "${name}"?`)) return;
+    try {
+      await deleteCategory(id);
+      setCategories(prev => prev.filter(c => c.id !== id));
+      toast(`Kategori ${name} dihapus`);
+    } catch (e: unknown) { toast((e as Error).message, "err"); }
+  }
+
+  // Client handlers
+  async function handleAddClient(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newClient.ip.trim()) return;
+    try {
+      const c = await addClient(newClient);
+      setClients(prev => [...prev, c]);
+      setDetected(prev => prev.filter(d => d.ip !== newClient.ip));
+      setNewClient({ ip: "", name: "", action: "allow", notes: "" });
+      toast("Client ditambahkan");
+    } catch (e: unknown) { toast((e as Error).message, "err"); }
+  }
+
+  async function handleDeleteClient(id: number) {
+    try {
+      await deleteClient(id);
+      setClients(prev => prev.filter(c => c.id !== id));
+      toast("Client dihapus");
+    } catch (e: unknown) { toast((e as Error).message, "err"); }
+  }
+
+  async function handleQuickAddClient(ip: string) {
+    try {
+      const c = await addClient({ ip, name: "", action: "allow", notes: "Auto-detected" });
+      setClients(prev => [...prev, c]);
+      setDetected(prev => prev.filter(d => d.ip !== ip));
+      toast(`Client ${ip} ditambahkan`);
+    } catch (e: unknown) { toast((e as Error).message, "err"); }
+  }
+
+  // Record handlers
+  async function handleAddRecord(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newRecord.name.trim() || !newRecord.value.trim()) return;
+    try {
+      await addRecord({ ...newRecord, active: true });
+      setNewRecord({ name: "", type: "A", value: "", ttl: 3600, priority: 0, notes: "" });
+      toast("Record ditambahkan");
+      loadRecords(1, recordSearch, recordTypeFilter);
+    } catch (e: unknown) { toast((e as Error).message, "err"); }
+  }
+
+  async function handleDeleteRecord(id: number, name: string) {
+    if (!window.confirm(`Hapus record "${name}"?`)) return;
+    try {
+      await deleteRecord(id);
+      toast(`Record ${name} dihapus`);
+      loadRecords();
+    } catch (e: unknown) { toast((e as Error).message, "err"); }
+  }
+
+  async function toggleRecord(r: CustomRecord) {
+    try {
+      const updated = await updateRecord(r.id, { ...r, active: !r.active });
+      setRecords(prev => prev.map(x => x.id === r.id ? updated : x));
+    } catch (e: unknown) { toast((e as Error).message, "err"); }
   }
 
   async function handleChangePw(e: React.FormEvent) {
@@ -267,6 +420,10 @@ export default function AdminPage() {
     } catch (e: unknown) { toast((e as Error).message, "err"); }
     finally { setPwSaving(false); }
   }
+
+  const domainPages = Math.max(1, Math.ceil(domainTotal / DOMAIN_LIMIT));
+  const recordPages = Math.max(1, Math.ceil(recordTotal / RECORD_LIMIT));
+  const DNS_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "PTR", "NS", "SRV"];
 
   //  Render 
   return (
@@ -297,9 +454,9 @@ export default function AdminPage() {
           <button onClick={loadAll} className="p-1.5 hover:text-foreground transition-colors" style={{ color: "var(--brand-muted)" }} title="Refresh">
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
-          <a href="/" className="text-[10px] tracking-widest uppercase hover:text-foreground transition-colors" style={{ color: "var(--brand-muted)" }}>
+          <Link href="/" className="text-[10px] tracking-widest uppercase hover:text-foreground transition-colors" style={{ color: "var(--brand-muted)" }}>
             Halaman Utama
-          </a>
+          </Link>
           <button
             onClick={handleLogout}
             className="flex items-center gap-1.5 text-[10px] tracking-widest uppercase hover:text-red-400 transition-colors"
@@ -327,9 +484,14 @@ export default function AdminPage() {
               {tab === t.id && <span className="absolute left-0 top-1 bottom-1 w-0.5 rounded-r" style={{ background: "var(--brand-primary)" }} />}
               {t.icon}
               {t.label}
-              {t.id === "domains" && domains.length > 0 && (
+              {t.id === "domains" && domainTotal > 0 && (
                 <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ background: "var(--brand-border)", color: "var(--brand-muted)" }}>
-                  {domains.filter(d => d.active).length}
+                  {domainTotal.toLocaleString()}
+                </span>
+              )}
+              {t.id === "records" && recordTotal > 0 && (
+                <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ background: "var(--brand-border)", color: "var(--brand-muted)" }}>
+                  {recordTotal}
                 </span>
               )}
             </button>
@@ -349,7 +511,7 @@ export default function AdminPage() {
           style={{ background: "var(--brand-card-bg)", borderColor: "var(--brand-border)" }}>
           {TABS.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
-              className="flex flex-col items-center gap-1 px-4 py-2.5 text-[9px] font-medium tracking-wide shrink-0 transition-colors border-t-2"
+              className="flex flex-col items-center gap-1 px-3 py-2.5 text-[8px] font-medium tracking-wide shrink-0 transition-colors border-t-2"
               style={{ color: tab === t.id ? "var(--brand-primary)" : "var(--brand-muted)", borderColor: tab === t.id ? "var(--brand-primary)" : "transparent" }}>
               {t.icon}{t.label}
             </button>
@@ -378,14 +540,18 @@ export default function AdminPage() {
             <>
               {/*  OVERVIEW  */}
               {tab === "overview" && branding && dnsConfig && (
-                <div className="max-w-3xl space-y-6">
+                <div className="space-y-6">
                   <SectionTitle title="Overview" sub="Status sistem dan ringkasan konfigurasi aktif" />
+
+                  {/* Live Metrics (compact, WebSocket) */}
+                  <LiveMetrics compact />
+
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {[
-                      { label: "Total Domain",    value: domains.length,                        icon: <Globe className="w-4 h-4" /> },
-                      { label: "Domain Aktif",    value: domains.filter(d => d.active).length,  icon: <CheckCircle2 className="w-4 h-4" /> },
-                      { label: "Domain Nonaktif", value: domains.filter(d => !d.active).length, icon: <XCircle className="w-4 h-4" /> },
-                      { label: "DNS Listen",      value: dnsConfig.listen_addr.split(":")[1] ?? "53", icon: <Server className="w-4 h-4" /> },
+                      { label: "Total Domain", value: domainTotal.toLocaleString(), icon: <Globe className="w-4 h-4" /> },
+                      { label: "Kategori",     value: categories.length,            icon: <Tags className="w-4 h-4" /> },
+                      { label: "ACL Clients",  value: clients.length,               icon: <Users className="w-4 h-4" /> },
+                      { label: "DNS Records",  value: recordTotal,                  icon: <FileText className="w-4 h-4" /> },
                     ].map(stat => (
                       <div key={stat.label} className="border rounded p-4 space-y-2"
                         style={{ borderColor: "var(--brand-border)", background: "var(--brand-card-bg)" }}>
@@ -404,11 +570,12 @@ export default function AdminPage() {
                     </div>
                     <div className="divide-y" style={{ borderColor: "var(--brand-border)" }}>
                       {[
-                        ["ISP",            `${branding.isp_name} [${branding.isp_as_number}]`],
-                        ["Block Page URL",  branding.block_page_url],
-                        ["Redirect IP",     dnsConfig.redirect_ip],
-                        ["Upstream DNS",    dnsConfig.upstream_dns],
-                        ["API Port",        `:${dnsConfig.http_port}`],
+                        ["ISP",              `${branding.isp_name} [${branding.isp_as_number}]`],
+                        ["Block Page URL",   branding.block_page_url],
+                        ["Redirect IP",      dnsConfig.redirect_ip],
+                        ["Upstream DNS",     dnsConfig.upstream_dns],
+                        ["API Port",         `:${dnsConfig.http_port}`],
+                        ["ACL Default",      dnsConfig.acl_default_allow ? "Allow All" : "Block All"],
                       ].map(([k, v]) => (
                         <div key={k} className="flex items-center justify-between px-4 py-3">
                           <span className="text-xs" style={{ color: "var(--brand-muted)" }}>{k}</span>
@@ -417,26 +584,6 @@ export default function AdminPage() {
                       ))}
                     </div>
                   </div>
-
-                  {domains.length > 0 && (
-                    <div className="border rounded" style={{ borderColor: "var(--brand-border)" }}>
-                      <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: "var(--brand-border)" }}>
-                        <p className="text-[10px] font-bold tracking-[0.15em] uppercase" style={{ color: "var(--brand-muted)" }}>Domain Terblokir Terbaru</p>
-                        <button onClick={() => setTab("domains")} className="text-[10px] flex items-center gap-1 hover:text-foreground transition-colors" style={{ color: "var(--brand-accent)" }}>
-                          Lihat Semua <ChevronRight className="w-3 h-3" />
-                        </button>
-                      </div>
-                      {domains.slice(0, 5).map(d => (
-                        <div key={d.id} className="flex items-center justify-between px-4 py-2.5 border-b last:border-0" style={{ borderColor: "var(--brand-border)" }}>
-                          <div className="flex items-center gap-2">
-                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${d.active ? "bg-green-400" : "bg-zinc-600"}`} />
-                            <span className="text-xs font-mono">{d.domain}</span>
-                          </div>
-                          <span className="text-[10px] px-2 py-0.5 rounded" style={{ background: "var(--brand-border)", color: "var(--brand-muted)" }}>{d.category || "-"}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -557,10 +704,27 @@ export default function AdminPage() {
                 </div>
               )}
 
-              {/*  BLOCKED DOMAINS  */}
+              {/*  BLOCKED DOMAINS (PAGINATED)  */}
               {tab === "domains" && (
-                <div className="max-w-3xl space-y-6">
-                  <SectionTitle title="Blokir Domain" sub="Domain yang akan di-intercept oleh DNS server" />
+                <div className="max-w-4xl space-y-6">
+                  <SectionTitle title="Blokir Domain" sub={`${domainTotal.toLocaleString()} domain terdaftar`} />
+
+                  {/* Search & Filter bar */}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="relative flex-1 min-w-[200px]">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "var(--brand-muted)" }} />
+                      <input type="text" placeholder="Cari domain..." value={domainSearch}
+                        onChange={e => { setDomainSearch(e.target.value); setDomainPage(1); }}
+                        className="w-full pl-9 pr-3 py-2 text-sm border rounded bg-transparent outline-none font-mono"
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                    </div>
+                    <select value={domainCatFilter} onChange={e => { setDomainCatFilter(e.target.value); setDomainPage(1); }}
+                      className="px-3 py-2 text-sm border rounded bg-transparent outline-none"
+                      style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }}>
+                      <option value="">Semua Kategori</option>
+                      {categories.map(c => <option key={c.id} value={c.name}>{c.name} ({c.domain_count})</option>)}
+                    </select>
+                  </div>
 
                   {/* Add single domain */}
                   <form onSubmit={handleAddDomain} className="border rounded p-5 space-y-4" style={{ borderColor: "var(--brand-border)" }}>
@@ -629,23 +793,22 @@ export default function AdminPage() {
                       )}
                     </div>
 
-                    {/* Quick presets */}
-                    <div className="space-y-2 pt-1">
-                      <p className="text-[9px] tracking-widest uppercase" style={{ color: "var(--brand-border)" }}>Contoh sumber blacklist publik:</p>
-                      <div className="flex flex-wrap gap-2">
-                        {[
-                          { label: "StevenBlack Unified", url: "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts" },
-                          { label: "OISD Full", url: "https://big.oisd.nl/domainswild" },
-                          { label: "NoTracking", url: "https://raw.githubusercontent.com/notracking/hosts-blocklists/master/dnscrypt-proxy/dnscrypt-proxy.blacklist.txt" },
-                        ].map(p => (
-                          <button key={p.label} type="button" onClick={() => setImportUrl(p.url)}
-                            className="text-[10px] px-2 py-1 rounded border transition-colors hover:text-foreground"
-                            style={{ borderColor: "var(--brand-border)", color: "var(--brand-muted)" }}>
-                            {p.label}
-                          </button>
-                        ))}
+                    {/* Presets from API */}
+                    {presets.length > 0 && (
+                      <div className="space-y-2 pt-1">
+                        <p className="text-[9px] tracking-widest uppercase" style={{ color: "var(--brand-border)" }}>Blocklist presets:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {presets.map(p => (
+                            <button key={p.label} type="button" onClick={() => { setImportUrl(p.url); setImportCategory(p.category); }}
+                              className="text-[10px] px-2 py-1 rounded border transition-colors hover:text-foreground"
+                              style={{ borderColor: "var(--brand-border)", color: "var(--brand-muted)" }}
+                              title={p.description}>
+                              {p.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </form>
 
                   {/* Domains table */}
@@ -660,7 +823,7 @@ export default function AdminPage() {
                     </div>
                     {domains.length === 0 ? (
                       <div className="px-4 py-10 text-center text-xs" style={{ color: "var(--brand-muted)" }}>
-                        Belum ada domain yang diblokir
+                        {domainSearch || domainCatFilter ? "Tidak ada domain yang cocok" : "Belum ada domain yang diblokir"}
                       </div>
                     ) : domains.map(d => (
                       <div key={d.id} className="grid grid-cols-12 px-4 py-3 border-b last:border-0 items-center hover:bg-white/[0.02]"
@@ -683,6 +846,321 @@ export default function AdminPage() {
                       </div>
                     ))}
                   </div>
+
+                  {/* Pagination */}
+                  {domainPages > 1 && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-mono" style={{ color: "var(--brand-muted)" }}>
+                        Halaman {domainPage} / {domainPages}  ({domainTotal.toLocaleString()} domain)
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setDomainPage(p => Math.max(1, p - 1))} disabled={domainPage <= 1}
+                          className="p-1.5 border rounded disabled:opacity-30 transition-colors hover:text-foreground"
+                          style={{ borderColor: "var(--brand-border)", color: "var(--brand-muted)" }}>
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => setDomainPage(p => Math.min(domainPages, p + 1))} disabled={domainPage >= domainPages}
+                          className="p-1.5 border rounded disabled:opacity-30 transition-colors hover:text-foreground"
+                          style={{ borderColor: "var(--brand-border)", color: "var(--brand-muted)" }}>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/*  CATEGORIES  */}
+              {tab === "categories" && (
+                <div className="max-w-3xl space-y-6">
+                  <SectionTitle title="Kategori" sub="Kelola kategori untuk domain yang diblokir" />
+
+                  {/* Add category form */}
+                  <form onSubmit={handleAddCategory} className="border rounded p-5 space-y-4" style={{ borderColor: "var(--brand-border)" }}>
+                    <CardHeader label="Tambah Kategori" />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <input type="text" placeholder="Nama Kategori" value={newCat.name}
+                        onChange={e => setNewCat(c => ({ ...c, name: e.target.value }))} required
+                        className="px-3 py-2 text-sm border rounded bg-transparent outline-none"
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                      <input type="text" placeholder="Deskripsi" value={newCat.description}
+                        onChange={e => setNewCat(c => ({ ...c, description: e.target.value }))}
+                        className="px-3 py-2 text-sm border rounded bg-transparent outline-none"
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex items-center gap-2">
+                        <input type="color" value={newCat.color} onChange={e => setNewCat(c => ({ ...c, color: e.target.value }))}
+                          className="w-8 h-8 rounded border cursor-pointer" style={{ borderColor: "var(--brand-border)" }} />
+                        <input type="text" value={newCat.color} onChange={e => setNewCat(c => ({ ...c, color: e.target.value }))}
+                          className="flex-1 px-3 py-2 text-sm border rounded bg-transparent outline-none font-mono"
+                          style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                      </div>
+                      <input type="text" placeholder="Icon (lucide name)" value={newCat.icon}
+                        onChange={e => setNewCat(c => ({ ...c, icon: e.target.value }))}
+                        className="px-3 py-2 text-sm border rounded bg-transparent outline-none font-mono"
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                    </div>
+                    <button type="submit"
+                      className="flex items-center gap-2 px-4 py-2 text-xs font-bold tracking-widest uppercase border transition-all"
+                      style={{ color: "var(--brand-accent)", borderColor: "var(--brand-accent)", background: "rgba(99,102,241,0.06)" }}>
+                      <Plus className="w-3.5 h-3.5" /> Tambah Kategori
+                    </button>
+                  </form>
+
+                  {/* Categories table */}
+                  <div className="border rounded overflow-hidden" style={{ borderColor: "var(--brand-border)" }}>
+                    <div className="grid grid-cols-12 px-4 py-2 border-b text-[9px] font-bold tracking-[0.15em] uppercase"
+                      style={{ borderColor: "var(--brand-border)", color: "var(--brand-muted)", background: "var(--brand-card-bg)" }}>
+                      <div className="col-span-1">Warna</div>
+                      <div className="col-span-3">Nama</div>
+                      <div className="col-span-4">Deskripsi</div>
+                      <div className="col-span-2">Domain</div>
+                      <div className="col-span-2 text-right">Aksi</div>
+                    </div>
+                    {categories.length === 0 ? (
+                      <div className="px-4 py-10 text-center text-xs" style={{ color: "var(--brand-muted)" }}>
+                        Belum ada kategori
+                      </div>
+                    ) : categories.map(c => (
+                      <div key={c.id} className="grid grid-cols-12 px-4 py-3 border-b last:border-0 items-center hover:bg-white/[0.02]"
+                        style={{ borderColor: "var(--brand-border)" }}>
+                        <div className="col-span-1">
+                          <span className="w-4 h-4 rounded-full inline-block" style={{ background: c.color || "#888" }} />
+                        </div>
+                        <div className="col-span-3 text-xs font-medium">{c.name}</div>
+                        <div className="col-span-4 text-xs truncate" style={{ color: "var(--brand-muted)" }}>{c.description || "-"}</div>
+                        <div className="col-span-2 text-xs font-mono" style={{ color: "var(--brand-muted)" }}>{c.domain_count}</div>
+                        <div className="col-span-2 flex justify-end">
+                          <button onClick={() => handleDeleteCategory(c.id, c.name)} className="hover:text-red-400 transition-colors" style={{ color: "var(--brand-muted)" }}>
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/*  CLIENTS / ACL  */}
+              {tab === "clients" && (
+                <div className="max-w-3xl space-y-6">
+                  <SectionTitle title="Clients / ACL" sub="Kontrol akses client berdasarkan IP — default: Allow All" />
+
+                  {/* Detected clients */}
+                  {detected.length > 0 && (
+                    <div className="border rounded p-5 space-y-3" style={{ borderColor: "var(--brand-border)" }}>
+                      <CardHeader label="Client Terdeteksi (belum dikelola)" />
+                      <div className="flex flex-wrap gap-2">
+                        {detected.map(d => (
+                          <div key={d.ip} className="flex items-center gap-2 px-3 py-1.5 border rounded text-xs font-mono"
+                            style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }}>
+                            <span>{d.ip}</span>
+                            <span className="text-[9px]" style={{ color: "var(--brand-muted)" }}>({d.query_count}q)</span>
+                            <button onClick={() => handleQuickAddClient(d.ip)}
+                              className="text-[10px] px-2 py-0.5 rounded border hover:text-foreground transition-colors"
+                              style={{ borderColor: "var(--brand-accent)", color: "var(--brand-accent)" }}>
+                              + Allow
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Add client form */}
+                  <form onSubmit={handleAddClient} className="border rounded p-5 space-y-4" style={{ borderColor: "var(--brand-border)" }}>
+                    <CardHeader label="Tambah Client Manual" />
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                      <input type="text" placeholder="IP Address" value={newClient.ip}
+                        onChange={e => setNewClient(c => ({ ...c, ip: e.target.value }))} required
+                        className="px-3 py-2 text-sm border rounded bg-transparent outline-none font-mono"
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                      <input type="text" placeholder="Nama (opsional)" value={newClient.name}
+                        onChange={e => setNewClient(c => ({ ...c, name: e.target.value }))}
+                        className="px-3 py-2 text-sm border rounded bg-transparent outline-none"
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                      <select value={newClient.action} onChange={e => setNewClient(c => ({ ...c, action: e.target.value }))}
+                        className="px-3 py-2 text-sm border rounded bg-transparent outline-none"
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }}>
+                        <option value="allow">Allow</option>
+                        <option value="block">Block</option>
+                      </select>
+                      <input type="text" placeholder="Catatan" value={newClient.notes}
+                        onChange={e => setNewClient(c => ({ ...c, notes: e.target.value }))}
+                        className="px-3 py-2 text-sm border rounded bg-transparent outline-none"
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                    </div>
+                    <button type="submit"
+                      className="flex items-center gap-2 px-4 py-2 text-xs font-bold tracking-widest uppercase border transition-all"
+                      style={{ color: "var(--brand-accent)", borderColor: "var(--brand-accent)", background: "rgba(99,102,241,0.06)" }}>
+                      <Plus className="w-3.5 h-3.5" /> Tambah Client
+                    </button>
+                  </form>
+
+                  {/* Clients table */}
+                  <div className="border rounded overflow-hidden" style={{ borderColor: "var(--brand-border)" }}>
+                    <div className="grid grid-cols-12 px-4 py-2 border-b text-[9px] font-bold tracking-[0.15em] uppercase"
+                      style={{ borderColor: "var(--brand-border)", color: "var(--brand-muted)", background: "var(--brand-card-bg)" }}>
+                      <div className="col-span-3">IP</div>
+                      <div className="col-span-3">Nama</div>
+                      <div className="col-span-2">Aksi</div>
+                      <div className="col-span-3">Catatan</div>
+                      <div className="col-span-1 text-right">Hapus</div>
+                    </div>
+                    {clients.length === 0 ? (
+                      <div className="px-4 py-10 text-center text-xs" style={{ color: "var(--brand-muted)" }}>
+                        Belum ada client yang dikelola — Default: allow all
+                      </div>
+                    ) : clients.map(c => (
+                      <div key={c.id} className="grid grid-cols-12 px-4 py-3 border-b last:border-0 items-center hover:bg-white/[0.02]"
+                        style={{ borderColor: "var(--brand-border)" }}>
+                        <div className="col-span-3 text-xs font-mono">{c.ip}</div>
+                        <div className="col-span-3 text-xs" style={{ color: "var(--brand-muted)" }}>{c.name || "-"}</div>
+                        <div className="col-span-2">
+                          <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${c.action === "allow" ? "text-green-400" : "text-red-400"}`}
+                            style={{ background: c.action === "allow" ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)" }}>
+                            {c.action}
+                          </span>
+                        </div>
+                        <div className="col-span-3 text-xs truncate" style={{ color: "var(--brand-muted)" }}>{c.notes || "-"}</div>
+                        <div className="col-span-1 flex justify-end">
+                          <button onClick={() => handleDeleteClient(c.id)} className="hover:text-red-400 transition-colors" style={{ color: "var(--brand-muted)" }}>
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/*  CUSTOM DNS RECORDS (PAGINATED)  */}
+              {tab === "records" && (
+                <div className="max-w-4xl space-y-6">
+                  <SectionTitle title="DNS Records" sub={`${recordTotal} custom record — seperti real DNS server (A, AAAA, CNAME, MX, TXT, PTR, NS, SRV)`} />
+
+                  {/* Search & Filter */}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="relative flex-1 min-w-[200px]">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "var(--brand-muted)" }} />
+                      <input type="text" placeholder="Cari name..." value={recordSearch}
+                        onChange={e => { setRecordSearch(e.target.value); setRecordPage(1); }}
+                        className="w-full pl-9 pr-3 py-2 text-sm border rounded bg-transparent outline-none font-mono"
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                    </div>
+                    <select value={recordTypeFilter} onChange={e => { setRecordTypeFilter(e.target.value); setRecordPage(1); }}
+                      className="px-3 py-2 text-sm border rounded bg-transparent outline-none"
+                      style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }}>
+                      <option value="">Semua Type</option>
+                      {DNS_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+
+                  {/* Add record form */}
+                  <form onSubmit={handleAddRecord} className="border rounded p-5 space-y-4" style={{ borderColor: "var(--brand-border)" }}>
+                    <CardHeader label="Tambah Record" />
+                    <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
+                      <input type="text" placeholder="nama.domain.com" value={newRecord.name}
+                        onChange={e => setNewRecord(r => ({ ...r, name: e.target.value }))} required
+                        className="sm:col-span-2 px-3 py-2 text-sm border rounded bg-transparent outline-none font-mono"
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                      <select value={newRecord.type} onChange={e => setNewRecord(r => ({ ...r, type: e.target.value }))}
+                        className="px-3 py-2 text-sm border rounded bg-transparent outline-none"
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }}>
+                        {DNS_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                      <input type="text" placeholder="Value" value={newRecord.value}
+                        onChange={e => setNewRecord(r => ({ ...r, value: e.target.value }))} required
+                        className="sm:col-span-2 px-3 py-2 text-sm border rounded bg-transparent outline-none font-mono"
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                      <input type="number" placeholder="TTL" value={newRecord.ttl}
+                        onChange={e => setNewRecord(r => ({ ...r, ttl: Number(e.target.value) }))}
+                        className="px-3 py-2 text-sm border rounded bg-transparent outline-none font-mono"
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                    </div>
+                    {(newRecord.type === "MX" || newRecord.type === "SRV") && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <input type="number" placeholder="Priority" value={newRecord.priority}
+                          onChange={e => setNewRecord(r => ({ ...r, priority: Number(e.target.value) }))}
+                          className="px-3 py-2 text-sm border rounded bg-transparent outline-none font-mono"
+                          style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                        <input type="text" placeholder="Catatan (opsional)" value={newRecord.notes}
+                          onChange={e => setNewRecord(r => ({ ...r, notes: e.target.value }))}
+                          className="px-3 py-2 text-sm border rounded bg-transparent outline-none"
+                          style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                      </div>
+                    )}
+                    <button type="submit"
+                      className="flex items-center gap-2 px-4 py-2 text-xs font-bold tracking-widest uppercase border transition-all"
+                      style={{ color: "var(--brand-accent)", borderColor: "var(--brand-accent)", background: "rgba(99,102,241,0.06)" }}>
+                      <Plus className="w-3.5 h-3.5" /> Tambah Record
+                    </button>
+                  </form>
+
+                  {/* Records table */}
+                  <div className="border rounded overflow-hidden" style={{ borderColor: "var(--brand-border)" }}>
+                    <div className="grid grid-cols-12 px-4 py-2 border-b text-[9px] font-bold tracking-[0.15em] uppercase"
+                      style={{ borderColor: "var(--brand-border)", color: "var(--brand-muted)", background: "var(--brand-card-bg)" }}>
+                      <div className="col-span-1">Aktif</div>
+                      <div className="col-span-3">Name</div>
+                      <div className="col-span-1">Type</div>
+                      <div className="col-span-3">Value</div>
+                      <div className="col-span-1">TTL</div>
+                      <div className="col-span-2">Notes</div>
+                      <div className="col-span-1 text-right">Aksi</div>
+                    </div>
+                    {records.length === 0 ? (
+                      <div className="px-4 py-10 text-center text-xs" style={{ color: "var(--brand-muted)" }}>
+                        {recordSearch || recordTypeFilter ? "Tidak ada record yang cocok" : "Belum ada custom DNS record"}
+                      </div>
+                    ) : records.map(r => (
+                      <div key={r.id} className="grid grid-cols-12 px-4 py-3 border-b last:border-0 items-center hover:bg-white/[0.02]"
+                        style={{ borderColor: "var(--brand-border)" }}>
+                        <div className="col-span-1">
+                          <button onClick={() => toggleRecord(r)} title={r.active ? "Nonaktifkan" : "Aktifkan"}>
+                            {r.active
+                              ? <Eye className="w-3.5 h-3.5 text-green-400" />
+                              : <EyeOff className="w-3.5 h-3.5" style={{ color: "var(--brand-muted)" }} />}
+                          </button>
+                        </div>
+                        <div className="col-span-3 text-xs font-mono truncate">{r.name}</div>
+                        <div className="col-span-1">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded font-bold font-mono"
+                            style={{ background: "rgba(99,102,241,0.1)", color: "#6366f1" }}>{r.type}</span>
+                        </div>
+                        <div className="col-span-3 text-xs font-mono truncate" style={{ color: "var(--brand-muted)" }}>{r.value}</div>
+                        <div className="col-span-1 text-xs font-mono" style={{ color: "var(--brand-muted)" }}>{r.ttl}</div>
+                        <div className="col-span-2 text-xs truncate" style={{ color: "var(--brand-muted)" }}>{r.notes || "-"}</div>
+                        <div className="col-span-1 flex justify-end">
+                          <button onClick={() => handleDeleteRecord(r.id, r.name)} className="hover:text-red-400 transition-colors" style={{ color: "var(--brand-muted)" }}>
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Pagination */}
+                  {recordPages > 1 && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-mono" style={{ color: "var(--brand-muted)" }}>
+                        Halaman {recordPage} / {recordPages} ({recordTotal} records)
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setRecordPage(p => Math.max(1, p - 1))} disabled={recordPage <= 1}
+                          className="p-1.5 border rounded disabled:opacity-30 transition-colors hover:text-foreground"
+                          style={{ borderColor: "var(--brand-border)", color: "var(--brand-muted)" }}>
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => setRecordPage(p => Math.min(recordPages, p + 1))} disabled={recordPage >= recordPages}
+                          className="p-1.5 border rounded disabled:opacity-30 transition-colors hover:text-foreground"
+                          style={{ borderColor: "var(--brand-border)", color: "var(--brand-muted)" }}>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -696,6 +1174,28 @@ export default function AdminPage() {
                     <Field label="Upstream DNS"   value={dnsConfig.upstream_dns} onChange={v => setDnsConfig(c => c && { ...c, upstream_dns: v })} mono />
                     <Field label="Redirect IP"    value={dnsConfig.redirect_ip}  onChange={v => setDnsConfig(c => c && { ...c, redirect_ip: v })}  mono />
                     <Field label="Admin API Port" value={dnsConfig.http_port}    onChange={v => setDnsConfig(c => c && { ...c, http_port: v })}    mono />
+                  </div>
+
+                  {/* ACL Default Toggle */}
+                  <div className="space-y-3 border rounded p-5" style={{ borderColor: "var(--brand-border)" }}>
+                    <CardHeader label="Access Control (ACL)" />
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => setDnsConfig(c => c && { ...c, acl_default_allow: !c.acl_default_allow })}
+                        className="relative w-11 h-6 rounded-full transition-colors"
+                        style={{ background: dnsConfig.acl_default_allow ? "#22c55e" : "#ef4444" }}>
+                        <span className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform"
+                          style={{ transform: dnsConfig.acl_default_allow ? "translateX(20px)" : "translateX(0)" }} />
+                      </button>
+                      <span className="text-xs">
+                        Default: <strong>{dnsConfig.acl_default_allow ? "Allow All" : "Block All"}</strong>
+                      </span>
+                    </div>
+                    <p className="text-[11px]" style={{ color: "var(--brand-muted)" }}>
+                      {dnsConfig.acl_default_allow
+                        ? "Semua client diizinkan kecuali yang di-block di tab Clients"
+                        : "Semua client diblokir kecuali yang di-allow di tab Clients"}
+                    </p>
                   </div>
 
                   <div className="flex items-start gap-2 text-xs px-4 py-3 border rounded" style={{ borderColor: "rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.05)" }}>

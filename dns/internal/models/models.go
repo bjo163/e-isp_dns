@@ -79,13 +79,48 @@ UpdatedAt time.Time `json:"updated_at"`
 
 // BlockedDomain is a domain entry intercepted by the DNS server.
 type BlockedDomain struct {
+ID         uint      `gorm:"primaryKey" json:"id"`
+Domain     string    `gorm:"uniqueIndex;not null" json:"domain"`
+Reason     string    `json:"reason"`
+Category   string    `gorm:"index" json:"category"`
+Active     bool      `gorm:"default:true;index" json:"active"`
+CreatedAt  time.Time `json:"created_at"`
+UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// Category groups blocked domains by type (pornografi, judi, malware, etc.).
+type Category struct {
+ID          uint      `gorm:"primaryKey" json:"id"`
+Name        string    `gorm:"uniqueIndex;not null" json:"name"`
+Description string    `json:"description"`
+Color       string    `json:"color"`         // hex, e.g. #ef4444
+Icon        string    `json:"icon"`          // lucide icon name
+Active      bool      `gorm:"default:true" json:"active"`
+DomainCount int64     `gorm:"-" json:"domain_count"` // virtual
+CreatedAt   time.Time `json:"created_at"`
+UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// ACLClient represents a known client (subscriber) identified by IP.
+// Default action is "allow" — all clients can browse unless explicitly blocked.
+type ACLClient struct {
 ID        uint      `gorm:"primaryKey" json:"id"`
-Domain    string    `gorm:"uniqueIndex;not null" json:"domain"`
-Reason    string    `json:"reason"`
-Category  string    `json:"category"`
-Active    bool      `gorm:"default:true" json:"active"`
+IP        string    `gorm:"uniqueIndex;not null" json:"ip"` // IPv4 or IPv6
+Name      string    `json:"name"`                           // human label
+Action    string    `gorm:"default:allow;not null" json:"action"` // "allow" or "block"
+Notes     string    `json:"notes"`
 CreatedAt time.Time `json:"created_at"`
 UpdatedAt time.Time `json:"updated_at"`
+}
+
+// BlocklistPreset is a popular public blocklist URL with metadata.
+// NOT stored in DB — hardcoded in Go for the admin UI preset picker.
+type BlocklistPreset struct {
+Label       string `json:"label"`
+URL         string `json:"url"`
+Category    string `json:"category"`
+Description string `json:"description"`
+Format      string `json:"format"` // hosts, domains, adblock
 }
 
 // DNSConfig holds DNS server operational settings.
@@ -99,5 +134,23 @@ HTTPPort      string    `json:"http_port"`
 // It reads the Host header to identify the blocked domain and 302s to the
 // block page with ?domain=&reason=&cat= params.
 InterceptPort string    `json:"intercept_port"`
+// ACLDefaultAllow: if true all unknown clients pass through;
+// only IPs explicitly set to "block" are filtered.
+ACLDefaultAllow bool   `gorm:"default:true" json:"acl_default_allow"`
 UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// CustomRecord is a user-defined DNS record (like HestiaCP / BIND zone editor).
+// Supports A, AAAA, CNAME, MX, TXT, PTR, NS, SRV record types.
+type CustomRecord struct {
+ID        uint      `gorm:"primaryKey" json:"id"`
+Name      string    `gorm:"index;not null" json:"name"` // FQDN or subdomain, e.g. "mail.example.com"
+Type      string    `gorm:"index;not null" json:"type"` // A, AAAA, CNAME, MX, TXT, PTR, NS, SRV
+Value     string    `gorm:"not null" json:"value"`      // IP, hostname, text, etc.
+TTL       uint32    `gorm:"default:3600" json:"ttl"`    // seconds
+Priority  uint16    `gorm:"default:0" json:"priority"` // MX/SRV priority
+Active    bool      `gorm:"default:true;index" json:"active"`
+Notes     string    `json:"notes"`
+CreatedAt time.Time `json:"created_at"`
+UpdatedAt time.Time `json:"updated_at"`
 }

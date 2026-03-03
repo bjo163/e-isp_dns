@@ -26,6 +26,9 @@ if err := DB.AutoMigrate(
 &models.Branding{},
 &models.BlockedDomain{},
 &models.DNSConfig{},
+&models.Category{},
+&models.ACLClient{},
+&models.CustomRecord{},
 ); err != nil {
 log.Fatalf("db: auto-migrate failed: %v", err)
 }
@@ -100,12 +103,33 @@ CyberDrone9URL:  "https://trustpositif.komdigi.go.id/normalisasi",
 var cfg models.DNSConfig
 if db.First(&cfg).Error != nil {
 db.Create(&models.DNSConfig{
-ID:            1,
-ListenAddr:    "0.0.0.0:53",
-UpstreamDNS:   "8.8.8.8:53",
-RedirectIP:    "127.0.0.1",
-HTTPPort:      "8080",
-InterceptPort: "8081", // internal; Caddy :80 catch-all forwards here
+ID:              1,
+ListenAddr:      "0.0.0.0:53",
+UpstreamDNS:     "8.8.8.8:53",
+RedirectIP:      "127.0.0.1",
+HTTPPort:        "8080",
+InterceptPort:   "8081", // internal; Caddy :80 catch-all forwards here
+ACLDefaultAllow: true,   // all clients allowed by default
 })
+}
+
+// Default categories
+var catCount int64
+db.Model(&models.Category{}).Count(&catCount)
+if catCount == 0 {
+cats := []models.Category{
+{Name: "Pornografi", Description: "Konten pornografi dan eksploitasi seksual", Color: "#ef4444", Icon: "ShieldBan", Active: true},
+{Name: "Judi Online", Description: "Situs perjudian dan taruhan online", Color: "#f97316", Icon: "Dices", Active: true},
+{Name: "Penipuan", Description: "Phishing, scam, dan penipuan digital", Color: "#eab308", Icon: "AlertTriangle", Active: true},
+{Name: "Malware", Description: "Situs distribusi malware, ransomware, dan virus", Color: "#a855f7", Icon: "Bug", Active: true},
+{Name: "SARA", Description: "Konten kebencian berbasis suku, agama, ras, dan antargolongan", Color: "#ec4899", Icon: "Flame", Active: true},
+{Name: "Narkoba", Description: "Penjualan dan promosi narkotika dan obat terlarang", Color: "#14b8a6", Icon: "Pill", Active: true},
+{Name: "Terorisme", Description: "Propaganda dan konten radikal terorisme", Color: "#64748b", Icon: "Bomb", Active: true},
+{Name: "Pelanggaran HAKI", Description: "Pembajakan, streaming ilegal, dan pelanggaran hak cipta", Color: "#6366f1", Icon: "Copyright", Active: true},
+{Name: "Proxy & VPN", Description: "Layanan proxy, VPN, dan tools bypass pemblokiran", Color: "#06b6d4", Icon: "Globe", Active: true},
+{Name: "Lainnya", Description: "Kategori lain yang belum terklasifikasi", Color: "#78716c", Icon: "MoreHorizontal", Active: true},
+}
+db.CreateInBatches(cats, 10)
+log.Printf("db: seeded %d default categories", len(cats))
 }
 }

@@ -50,6 +50,11 @@
 		reverse_proxy 127.0.0.1:8080
 	}
 
+	# WebSocket for real-time metrics (admin dashboard)
+	handle /ws/metrics {
+		reverse_proxy 127.0.0.1:8080
+	}
+
 	# Everything else → Next.js :3000
 	handle {
 		reverse_proxy 127.0.0.1:3000 {

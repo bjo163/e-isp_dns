@@ -1,7 +1,6 @@
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { SiteFooter } from "@/components/layout/SiteFooter";
 import { HeroSection } from "@/components/sections/HeroSection";
-import { LiveMetrics } from "@/components/sections/LiveMetrics";
 import { CategoriesSection } from "@/components/sections/CategoriesSection";
 import { AppealSection } from "@/components/sections/AppealSection";
 import { ContactSection } from "@/components/sections/ContactSection";
@@ -17,7 +16,6 @@ export default async function Home({ searchParams }: Props) {
       <SiteHeader />
       <main className="flex-1">
         <HeroSection blockedDomain={domain} reason={reason} category={cat} />
-        <LiveMetrics />
         <CategoriesSection />
         <AppealSection />
         <ContactSection />
