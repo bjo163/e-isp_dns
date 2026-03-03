@@ -203,8 +203,13 @@ func handleChangePassword(c *fiber.Ctx) error {
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
 		return c.Status(401).JSON(fiber.Map{"error": "password lama salah"})
 	}
-	hash, _ := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
-	db.DB.Model(&user).Update("password_hash", string(hash))
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "gagal memproses password"})
+	}
+	if err := db.DB.Model(&user).Update("password_hash", string(hash)).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
 	return c.JSON(fiber.Map{"message": "password berhasil diubah"})
 }
 
@@ -301,7 +306,9 @@ func updateDomain(c *fiber.Ctx) error {
 	if err := c.BodyParser(&d); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
-	db.DB.Save(&d)
+	if err := db.DB.Save(&d).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
 	go cache.Reload(db.DB)
 	return c.JSON(d)
 }
@@ -389,10 +396,13 @@ func updateCategory(c *fiber.Ctx) error {
 	if err := c.BodyParser(&cat); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
-	db.DB.Save(&cat)
+	if err := db.DB.Save(&cat).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
 	if oldName != cat.Name {
 		db.DB.Model(&models.BlockedDomain{}).Where("category = ?", oldName).Update("category", cat.Name)
 	}
+	go cache.Reload(db.DB)
 	return c.JSON(cat)
 }
 
@@ -468,7 +478,9 @@ func updateClient(c *fiber.Ctx) error {
 	if err := c.BodyParser(&cl); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
-	db.DB.Save(&cl)
+	if err := db.DB.Save(&cl).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
 	go cache.ReloadACL(db.DB)
 	return c.JSON(cl)
 }
@@ -554,7 +566,9 @@ func updateRecord(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 	r.Type = strings.ToUpper(r.Type)
-	db.DB.Save(&r)
+	if err := db.DB.Save(&r).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
 	go cache.ReloadRecords(db.DB)
 	return c.JSON(r)
 }
@@ -608,7 +622,9 @@ func updateDNSConfig(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 	cfg.ID = 1
-	db.DB.Save(&cfg)
+	if err := db.DB.Save(&cfg).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
 	// Update ACL default policy from config
 	cache.SetACLDefault(cfg.ACLDefaultAllow)
 	return c.JSON(cfg)
@@ -756,7 +772,9 @@ func updateSubscription(c *fiber.Ctx) error {
 	if err := c.BodyParser(&s); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
-	db.DB.Save(&s)
+	if err := db.DB.Save(&s).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
 	return c.JSON(s)
 }
 

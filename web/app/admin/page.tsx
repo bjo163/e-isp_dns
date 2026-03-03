@@ -419,7 +419,7 @@ export default function AdminPage() {
   async function handleChangePw(e: React.FormEvent) {
     e.preventDefault();
     if (pwNew !== pwConfirm) { toast("Konfirmasi password tidak cocok", "err"); return; }
-    if (pwNew.length < 4) { toast("Password minimal 4 karakter", "err"); return; }
+    if (pwNew.length < 6) { toast("Password minimal 6 karakter", "err"); return; }
     setPwSaving(true);
     try {
       await changePassword(pwCurrent, pwNew);

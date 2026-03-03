@@ -130,7 +130,7 @@ const RingSize = 300 // 5 minutes of 1-second samples
 type Sample struct {
 	Ts          int64   `json:"ts"` // unix timestamp
 	QPS         uint64  `json:"qps"`
-	BlockedPS   uint64  `json:"bps"`
+	BlockedPS   uint64  `json:"block_ps"`
 	ForwardedPS uint64  `json:"fps"`
 	CacheL1PS   uint64  `json:"l1ps"`
 	CacheL2PS   uint64  `json:"l2ps"`
