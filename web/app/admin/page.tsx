@@ -8,6 +8,7 @@ import {
   Save, RefreshCw, AlertTriangle, CheckCircle2, XCircle, Eye, EyeOff,
   ChevronRight, ChevronLeft, Server, LogOut, KeyRound, Download,
   Users, Tags, FileText, Search, BarChart3, CalendarClock, Activity,
+  Database, Lock, ListFilter, Layers, Network,
 } from "lucide-react";
 import {
   getBranding, updateBranding, getDomains, addDomain, deleteDomain,
@@ -37,12 +38,19 @@ let _tid = 0;
 type Tab = "overview" | "blocklists" | "acl" | "querylog" | "blockpage" | "settings" | "domains" | "records" | "subscriptions" | "categories" | "clients" | "dns" | "security";
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: "overview",   label: "Overview",    icon: <Radio className="w-3.5 h-3.5" /> },
-  { id: "blocklists", label: "Blocklists",  icon: <Globe className="w-3.5 h-3.5" /> },
-  { id: "acl",        label: "Access Ctrl", icon: <Users className="w-3.5 h-3.5" /> },
-  { id: "querylog",   label: "Query Log",   icon: <FileText className="w-3.5 h-3.5" /> },
-  { id: "blockpage",  label: "Block Page",  icon: <Shield className="w-3.5 h-3.5" /> },
-  { id: "settings",   label: "Settings",    icon: <Server className="w-3.5 h-3.5" /> },
+  { id: "overview", label: "Overview", icon: <Radio className="w-3.5 h-3.5" /> },
+  { id: "domains", label: "Blocked Domains", icon: <Globe className="w-3.5 h-3.5" /> },
+  { id: "categories", label: "Kategori", icon: <Tags className="w-3.5 h-3.5" /> },
+  { id: "subscriptions", label: "Subscriptions", icon: <CalendarClock className="w-3.5 h-3.5" /> },
+  { id: "records", label: "DNS Records", icon: <Database className="w-3.5 h-3.5" /> },
+  { id: "clients", label: "Clients / ACL", icon: <Users className="w-3.5 h-3.5" /> },
+  { id: "blocklists", label: "Blocklists", icon: <ListFilter className="w-3.5 h-3.5" /> },
+  { id: "querylog", label: "Query Log", icon: <FileText className="w-3.5 h-3.5" /> },
+  { id: "blockpage", label: "Block Page", icon: <Shield className="w-3.5 h-3.5" /> },
+  { id: "dns", label: "DNS Config", icon: <Network className="w-3.5 h-3.5" /> },
+  { id: "acl", label: "Access Ctrl", icon: <Layers className="w-3.5 h-3.5" /> },
+  { id: "security", label: "Keamanan", icon: <Lock className="w-3.5 h-3.5" /> },
+  { id: "settings", label: "Settings", icon: <Server className="w-3.5 h-3.5" /> },
 ];
 
 //  Reusable Field 
@@ -142,16 +150,16 @@ function SaveBtn({ loading, onClick }: { loading: boolean; onClick: () => void }
 // 
 export default function AdminPage() {
   const router = useRouter();
-  const [tab, setTab]     = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("overview");
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Data states
-  const [branding, setBranding]   = useState<Branding | null>(null);
+  const [branding, setBranding] = useState<Branding | null>(null);
   const [dnsConfig, setDnsConfig] = useState<DNSConfig | null>(null);
   const [connected, setConnected] = useState<boolean | null>(null);
 
   // Paginated domains
-  const [domains, setDomains]       = useState<BlockedDomain[]>([]);
+  const [domains, setDomains] = useState<BlockedDomain[]>([]);
   const [domainTotal, setDomainTotal] = useState(0);
   const [domainPage, setDomainPage] = useState(1);
   const [domainSearch, setDomainSearch] = useState("");
@@ -172,7 +180,7 @@ export default function AdminPage() {
   const [clientStat, setClientStat] = useState<ClientStat | null>(null);
 
   // Custom DNS Records (paginated)
-  const [records, setRecords]       = useState<CustomRecord[]>([]);
+  const [records, setRecords] = useState<CustomRecord[]>([]);
   const [recordTotal, setRecordTotal] = useState(0);
   const [recordPage, setRecordPage] = useState(1);
   const [recordSearch, setRecordSearch] = useState("");
@@ -184,24 +192,24 @@ export default function AdminPage() {
   const [presets, setPresets] = useState<BlocklistPreset[]>([]);
 
   // Loading states
-  const [saving, setSaving]   = useState(false);
+  const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // New domain form
   const [newDomain, setNewDomain] = useState<NewDomain>({ domain: "", reason: "", category: "", active: true });
 
   // Import form
-  const [importUrl, setImportUrl]         = useState("");
+  const [importUrl, setImportUrl] = useState("");
   const [importCategory, setImportCategory] = useState("Blokir");
-  const [importReason, setImportReason]   = useState("");
-  const [importing, setImporting]         = useState(false);
-  const [importResult, setImportResult]   = useState<ImportResult | null>(null);
+  const [importReason, setImportReason] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
 
   // Change password form
   const [pwCurrent, setPwCurrent] = useState("");
-  const [pwNew, setPwNew]         = useState("");
+  const [pwNew, setPwNew] = useState("");
   const [pwConfirm, setPwConfirm] = useState("");
-  const [pwSaving, setPwSaving]   = useState(false);
+  const [pwSaving, setPwSaving] = useState(false);
 
   const toast = useCallback((msg: string, type: "ok" | "err" = "ok") => {
     const id = ++_tid;
@@ -249,11 +257,11 @@ export default function AdminPage() {
       setConnected(true);
       // Load sub-data in background
       loadDomains(1, "", "");
-      getCategories().then(setCategories).catch(() => {});
-      getClients().then(setClients).catch(() => {});
-      getDetectedClients().then(setDetected).catch(() => {});
+      getCategories().then(setCategories).catch(() => { });
+      getClients().then(setClients).catch(() => { });
+      getDetectedClients().then(setDetected).catch(() => { });
       loadRecords(1, "", "");
-      getPresets().then(setPresets).catch(() => {});
+      getPresets().then(setPresets).catch(() => { });
     } catch {
       setConnected(false);
     } finally {
@@ -1125,10 +1133,10 @@ export default function AdminPage() {
                   <SectionTitle title="DNS Config" sub="Konfigurasi operasional DNS server - restart server setelah menyimpan" />
 
                   <div className="space-y-4 border rounded p-5" style={{ borderColor: "var(--brand-border)" }}>
-                    <Field label="Listen Address" value={dnsConfig.listen_addr}  onChange={v => setDnsConfig(c => c && { ...c, listen_addr: v })}  mono />
-                    <Field label="Upstream DNS"   value={dnsConfig.upstream_dns} onChange={v => setDnsConfig(c => c && { ...c, upstream_dns: v })} mono />
-                    <Field label="Redirect IP"    value={dnsConfig.redirect_ip}  onChange={v => setDnsConfig(c => c && { ...c, redirect_ip: v })}  mono />
-                    <Field label="Admin API Port" value={dnsConfig.http_port}    onChange={v => setDnsConfig(c => c && { ...c, http_port: v })}    mono />
+                    <Field label="Listen Address" value={dnsConfig.listen_addr} onChange={v => setDnsConfig(c => c && { ...c, listen_addr: v })} mono />
+                    <Field label="Upstream DNS" value={dnsConfig.upstream_dns} onChange={v => setDnsConfig(c => c && { ...c, upstream_dns: v })} mono />
+                    <Field label="Redirect IP" value={dnsConfig.redirect_ip} onChange={v => setDnsConfig(c => c && { ...c, redirect_ip: v })} mono />
+                    <Field label="Admin API Port" value={dnsConfig.http_port} onChange={v => setDnsConfig(c => c && { ...c, http_port: v })} mono />
                   </div>
 
                   {/* ACL Default Toggle */}
@@ -1172,7 +1180,7 @@ export default function AdminPage() {
                   <form onSubmit={handleChangePw} className="border rounded p-5 space-y-4" style={{ borderColor: "var(--brand-border)" }}>
                     <CardHeader label="Ganti Password" />
                     <Field label="Password Saat Ini" value={pwCurrent} onChange={setPwCurrent} type="password" />
-                    <Field label="Password Baru"     value={pwNew}     onChange={setPwNew}     type="password" />
+                    <Field label="Password Baru" value={pwNew} onChange={setPwNew} type="password" />
                     <Field label="Konfirmasi Password Baru" value={pwConfirm} onChange={setPwConfirm} type="password" />
                     <button type="submit" disabled={pwSaving}
                       className="flex items-center gap-2 px-4 py-2 text-xs font-bold tracking-widest uppercase border transition-all disabled:opacity-50"
