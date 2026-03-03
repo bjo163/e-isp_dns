@@ -2,6 +2,7 @@
 
 import (
 "errors"
+"os"
 "strings"
 "time"
 
@@ -9,7 +10,12 @@ import (
 "github.com/gofiber/fiber/v2"
 )
 
-var jwtSecret = []byte("trustpositif-secret-change-in-prod")
+var jwtSecret = func() []byte {
+if s := os.Getenv("JWT_SECRET"); s != "" {
+return []byte(s)
+}
+return []byte("trustpositif-secret-change-in-prod")
+}()
 const tokenTTL = 24 * time.Hour
 
 type Claims struct {

@@ -55,6 +55,7 @@ services:
       - dns-data:/app/data
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=${JWT_SECRET:-trustpositif-secret-change-in-prod}
     depends_on:
       redis:
         condition: service_healthy
