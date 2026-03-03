@@ -58,8 +58,12 @@ func main() {
 	// 8. Start blocklist subscription scheduler (60s tick)
 	scheduler.Start(db.DB)
 
+	// 11. DNS Server logic
+	log.Printf("dns: initializing on %s", cfg.ListenAddr)
+	srv := dns.New(cfg.ListenAddr, cfg.UpstreamDNS, cfg.RedirectIP)
+
 	// 9. Start Fiber HTTP admin API (non-blocking)
-	app := api.New()
+	app := api.New(srv)
 	go func() {
 		addr := ":" + cfg.HTTPPort
 		log.Printf("api: Fiber listening on %s", addr)
@@ -68,13 +72,10 @@ func main() {
 		}
 	}()
 
-	// 10. Start HTTP intercept server — redirects blocked requests
-	//     from the browser to the block page with domain/reason/cat params.
+	// 10. Start HTTP intercept server
 	intSrv := intercept.New(":"+cfg.InterceptPort, blockPageURL)
 	go intSrv.Start()
 
-	// 11. Start DNS server (blocks)
-	log.Printf("dns: starting on %s (upstream %s, redirect %s)", cfg.ListenAddr, cfg.UpstreamDNS, cfg.RedirectIP)
-	srv := dns.New(cfg.ListenAddr, cfg.UpstreamDNS, cfg.RedirectIP)
+	// 11b. Run DNS server (blocking)
 	srv.Start()
 }

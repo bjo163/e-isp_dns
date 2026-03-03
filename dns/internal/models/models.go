@@ -235,3 +235,14 @@ type IPReputationSource struct {
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }
+
+// AuditLog records admin actions for security tracking.
+type AuditLog struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Admin     string    `gorm:"index" json:"admin"`  // username of the admin
+	Action    string    `json:"action"`              // e.g. "Add Domain", "Delete Client"
+	Target    string    `gorm:"index" json:"target"` // identifier of the affected object
+	Details   string    `json:"details"`             // JSON or description
+	IP        string    `json:"ip"`                  // Admin's IP
+	CreatedAt time.Time `json:"created_at"`
+}

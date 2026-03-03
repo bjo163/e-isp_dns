@@ -50,13 +50,6 @@ func (s *Server) Start() {
 }
 
 func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
-	start := time.Now()
-	metrics.IncTotalQueries()
-
-	msg := new(dns.Msg)
-	msg.SetReply(r)
-	msg.Authoritative = false
-
 	// Resolve client IP for logging + ACL
 	clientIP := ""
 	if addr := w.RemoteAddr(); addr != nil {
@@ -65,6 +58,19 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		}
 	}
 
+	resp := s.Resolve(r, clientIP)
+	w.WriteMsg(resp)
+}
+
+// Resolve processes a DNS query and returns a response, suitable for DoH or standard DNS.
+func (s *Server) Resolve(r *dns.Msg, clientIP string) *dns.Msg {
+	start := time.Now()
+	metrics.IncTotalQueries()
+
+	msg := new(dns.Msg)
+	msg.SetReply(r)
+	msg.Authoritative = false
+
 	for _, q := range r.Question {
 		qtype := dns.TypeToString[q.Qtype]
 		if qtype == "" {
@@ -72,7 +78,7 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		}
 		domain := trimDot(q.Name)
 
-		// ── 1. Custom DNS records (highest priority — like HestiaCP zone editor)
+		// ── 1. Custom DNS records
 		if recs := cache.LookupRecords(domain, qtype); len(recs) > 0 {
 			msg.Authoritative = true
 			for _, rec := range recs {
@@ -82,73 +88,58 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 			}
 			latUs := time.Since(start).Microseconds()
 			metrics.RecordLatency(latUs)
-			w.WriteMsg(msg)
 			metrics.LogQuery(metrics.QueryLog{
 				Ts: time.Now().UnixMilli(), Domain: domain, QType: qtype,
 				Action: "custom", LatencyUs: latUs, Client: clientIP,
 			})
-			return
+			return msg
 		}
 
 		// ── 2. Only check blocking for A/AAAA queries
 		if q.Qtype != dns.TypeA && q.Qtype != dns.TypeAAAA {
 			metrics.IncForwarded()
-			s.proxyAndRecord(w, r, start, domain, qtype, clientIP)
-			return
+			return s.proxyAndRecord(r, start, domain, qtype, clientIP)
 		}
-		qtypeN := q.Qtype // capture for respondBlocked
+		qtypeN := q.Qtype
 
-		// ── 3. Whitelist check — whitelisted domains always pass through
+		// ── 3. Whitelist check
 		if cache.IsWhitelisted(domain) {
 			metrics.IncForwarded()
-			s.proxyAndRecord(w, r, start, domain, qtype, clientIP)
-			return
+			return s.proxyAndRecord(r, start, domain, qtype, clientIP)
 		}
 
-		// ── 4. ACL check — category-aware blocking
+		// ── 4. ACL check
 		acl, aclFound := cache.GetClientACL(clientIP)
 		if aclFound {
 			if acl.Action == "allow" {
-				// Explicitly allowed client — bypass all blocking, forward upstream
 				metrics.IncForwarded()
-				s.proxyAndRecord(w, r, start, domain, qtype, clientIP)
-				return
+				return s.proxyAndRecord(r, start, domain, qtype, clientIP)
 			}
-			// action == "block"
 			if len(acl.BlockedCategories) == 0 {
-				// No categories → block ALL DNS
 				metrics.IncBlocked()
-				s.respondBlocked(w, msg, q.Name, qtypeN, start, domain, qtype, clientIP, "acl_blocked")
-				return
+				return s.buildBlockedResponse(msg, q.Name, qtypeN, start, domain, qtype, clientIP, "acl_blocked")
 			}
-			// Has categories → only block matching domains
 			if s.isBlocked(domain) {
 				_, cat := cache.Lookup(domain)
 				if s.categoryMatch(cat, acl.BlockedCategories) {
 					metrics.IncBlocked()
-					s.respondBlocked(w, msg, q.Name, qtypeN, start, domain, qtype, clientIP, "blocked")
-					return
+					return s.buildBlockedResponse(msg, q.Name, qtypeN, start, domain, qtype, clientIP, "blocked")
 				}
 			}
-			// Domain not in blocked list or category not matched → forward
 			metrics.IncForwarded()
-			s.proxyAndRecord(w, r, start, domain, qtype, clientIP)
-			return
+			return s.proxyAndRecord(r, start, domain, qtype, clientIP)
 		}
 
 		// No ACL entry — apply default policy
 		if !cache.GetACLDefault() {
-			// Default-deny — block all unknown clients
 			metrics.IncBlocked()
-			s.respondBlocked(w, msg, q.Name, qtypeN, start, domain, qtype, clientIP, "acl_blocked")
-			return
+			return s.buildBlockedResponse(msg, q.Name, qtypeN, start, domain, qtype, clientIP, "acl_blocked")
 		}
 
-		// ── 5. Domain blocklist check (default-allow + no ACL entry)
+		// ── 5. Domain blocklist check
 		if s.isBlocked(domain) {
 			metrics.IncBlocked()
-			s.respondBlocked(w, msg, q.Name, qtypeN, start, domain, qtype, clientIP, "blocked")
-			return
+			return s.buildBlockedResponse(msg, q.Name, qtypeN, start, domain, qtype, clientIP, "blocked")
 		}
 	}
 
@@ -162,26 +153,22 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 			qType = t
 		}
 	}
-	s.proxyAndRecord(w, r, start, qDomain, qType, clientIP)
+	return s.proxyAndRecord(r, start, qDomain, qType, clientIP)
 }
 
-// proxyAndRecord forwards upstream and records latency + query log.
-func (s *Server) proxyAndRecord(w dns.ResponseWriter, r *dns.Msg, start time.Time, domain, qtype, clientIP string) {
-	s.proxy(w, r)
+func (s *Server) proxyAndRecord(r *dns.Msg, start time.Time, domain, qtype, clientIP string) *dns.Msg {
+	resp := s.proxy(r)
 	latUs := time.Since(start).Microseconds()
 	metrics.RecordLatency(latUs)
 	metrics.LogQuery(metrics.QueryLog{
 		Ts: time.Now().UnixMilli(), Domain: domain, QType: qtype,
 		Action: "forwarded", LatencyUs: latUs, Client: clientIP,
 	})
+	return resp
 }
 
-// respondBlocked sends a redirect record (A or AAAA) and logs the action.
-func (s *Server) respondBlocked(w dns.ResponseWriter, msg *dns.Msg, qname string, qtype uint16, start time.Time, domain, qtypeStr, clientIP, action string) {
+func (s *Server) buildBlockedResponse(msg *dns.Msg, qname string, qtype uint16, start time.Time, domain, qtypeStr, clientIP, action string) *dns.Msg {
 	if qtype == dns.TypeAAAA {
-		// For AAAA queries, respond with NODATA (empty answer) so dual-stack
-		// clients don't bypass the block by falling back to real AAAA upstream.
-		// SOA in authority signals "this name exists but has no AAAA".
 		msg.Authoritative = true
 	} else {
 		rr := &dns.A{
@@ -192,14 +179,13 @@ func (s *Server) respondBlocked(w dns.ResponseWriter, msg *dns.Msg, qname string
 	}
 	latUs := time.Since(start).Microseconds()
 	metrics.RecordLatency(latUs)
-	w.WriteMsg(msg)
 	metrics.LogQuery(metrics.QueryLog{
 		Ts: time.Now().UnixMilli(), Domain: domain, QType: qtypeStr,
 		Action: action, LatencyUs: latUs, Client: clientIP,
 	})
+	return msg
 }
 
-// categoryMatch checks if cat appears in the allowed categories list.
 func (s *Server) categoryMatch(cat string, categories []string) bool {
 	if cat == "" {
 		return false
@@ -212,25 +198,22 @@ func (s *Server) categoryMatch(cat string, categories []string) bool {
 	return false
 }
 
-// isBlocked checks the two-layer cache (L1 sync.Map → L2 Redis).
 func (s *Server) isBlocked(domain string) bool {
 	return cache.IsBlocked(domain)
 }
 
-// proxy forwards the query to the upstream DNS resolver.
-// Uses a shared client with a 5-second timeout to avoid goroutine leaks (P-5 fix).
 var upstreamClient = &dns.Client{Timeout: 5 * time.Second}
 
-func (s *Server) proxy(w dns.ResponseWriter, r *dns.Msg) {
+func (s *Server) proxy(r *dns.Msg) *dns.Msg {
 	resp, _, err := upstreamClient.Exchange(r, s.upstreamDNS)
 	if err != nil {
-		dns.HandleFailed(w, r)
-		return
+		m := new(dns.Msg)
+		m.SetRcode(r, dns.RcodeServerFailure)
+		return m
 	}
-	w.WriteMsg(resp)
+	return resp
 }
 
-// buildRR creates a dns.RR from a custom record value.
 func buildRR(name, qtype string, rec cache.RecordVal) dns.RR {
 	hdr := dns.RR_Header{Name: name, Class: dns.ClassINET, Ttl: rec.TTL}
 	switch strings.ToUpper(qtype) {
@@ -264,8 +247,6 @@ func buildRR(name, qtype string, rec cache.RecordVal) dns.RR {
 		hdr.Rrtype = dns.TypePTR
 		return &dns.PTR{Hdr: hdr, Ptr: dns.Fqdn(rec.Value)}
 	case "SRV":
-		hdr.Rrtype = dns.TypeSRV
-		// Value format: "weight port target", e.g. "10 5060 sip.example.com"
 		parts := strings.Fields(rec.Value)
 		if len(parts) < 3 {
 			return nil

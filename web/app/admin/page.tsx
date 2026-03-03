@@ -33,15 +33,16 @@ import { AccessControlTab } from "@/components/tabs/AccessControlTab";
 import { QueryLogTab } from "@/components/tabs/QueryLogTab";
 import { ReputationTab } from "@/components/tabs/ReputationTab";
 import { BlockPageTab } from "@/components/tabs/BlockPageTab";
-import { SettingsTab } from "@/components/tabs/SettingsTab";
 import { SubscriptionsTab } from "@/components/sections/SubscriptionsTab";
+import { HistoricalLogsTab } from "@/components/tabs/HistoricalLogsTab";
+import { AuditLogsTab } from "@/components/tabs/AuditLogsTab";
 
 //  Toast helper 
 type Toast = { id: number; msg: string; type: "ok" | "err" };
 let _tid = 0;
 
 //  Tabs (refactored)
-type Tab = "overview" | "blocklists" | "querylog" | "blockpage" | "domains" | "records" | "subscriptions" | "categories" | "clients" | "dns" | "security" | "whitelist" | "analytics" | "branding" | "reputation";
+type Tab = "overview" | "blocklists" | "querylog" | "historical" | "auditlogs" | "blockpage" | "domains" | "records" | "subscriptions" | "categories" | "clients" | "dns" | "security" | "whitelist" | "analytics" | "branding" | "reputation";
 
 type TabItem = { id: Tab; label: string; icon: React.ReactNode };
 type TabGroup = { section: string; items: TabItem[] };
@@ -52,7 +53,8 @@ const TAB_GROUPS: TabGroup[] = [
     items: [
       { id: "overview", label: "Overview", icon: <Radio className="w-3.5 h-3.5" /> },
       { id: "analytics", label: "Analytics", icon: <BarChart3 className="w-3.5 h-3.5" /> },
-      { id: "querylog", label: "Query Log", icon: <FileText className="w-3.5 h-3.5" /> },
+      { id: "querylog", label: "Real-time Log", icon: <Activity className="w-3.5 h-3.5" /> },
+      { id: "historical", label: "Search History", icon: <Search className="w-3.5 h-3.5" /> },
     ],
   },
   {
@@ -76,6 +78,7 @@ const TAB_GROUPS: TabGroup[] = [
   {
     section: "System",
     items: [
+      { id: "auditlogs", label: "Audit Logs", icon: <ShieldAlert className="w-3.5 h-3.5" /> },
       { id: "blockpage", label: "Block Page", icon: <Shield className="w-3.5 h-3.5" /> },
       { id: "reputation", label: "IP Reputation", icon: <ShieldAlert className="w-3.5 h-3.5" /> },
       { id: "branding", label: "Branding", icon: <Paintbrush className="w-3.5 h-3.5" /> },
@@ -188,7 +191,6 @@ export default function AdminPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Data states
-  const [branding, setBranding] = useState<Branding | null>(null);
   const [dnsConfig, setDnsConfig] = useState<DNSConfig | null>(null);
   const [connected, setConnected] = useState<boolean | null>(null);
 
@@ -288,10 +290,8 @@ export default function AdminPage() {
   }, [recordPage, recordSearch, recordTypeFilter]);
 
   const loadAll = useCallback(async () => {
-    setLoading(true);
     try {
-      const [b, c] = await Promise.all([getBranding(), getDNSConfig()]);
-      setBranding(b);
+      const c = await getDNSConfig();
       setDnsConfig(c);
       setConnected(true);
       // Load sub-data in background
@@ -320,17 +320,6 @@ export default function AdminPage() {
     router.replace("/admin/login");
   }
 
-  //  Save handlers 
-  async function saveBranding() {
-    if (!branding) return;
-    setSaving(true);
-    try {
-      const updated = await updateBranding(branding);
-      setBranding(updated);
-      toast("Branding berhasil disimpan");
-    } catch (e: unknown) { toast((e as Error).message, "err"); }
-    finally { setSaving(false); }
-  }
 
   async function saveDNS() {
     if (!dnsConfig) return;
@@ -684,6 +673,12 @@ export default function AdminPage() {
 
               {/* QUERY LOG */}
               {tab === "querylog" && <QueryLogTab />}
+
+              {/* HISTORICAL SEARCH */}
+              {tab === "historical" && <HistoricalLogsTab />}
+
+              {/* AUDIT LOGS */}
+              {tab === "auditlogs" && <AuditLogsTab />}
 
               {/* BLOCK PAGE */}
               {tab === "blockpage" && <BlockPageTab />}

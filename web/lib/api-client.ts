@@ -9,6 +9,27 @@ export interface QueryLogEntry {
   created_at: string;
 }
 
+export interface QueryLogSearchParams {
+  page?: number;
+  limit?: number;
+  ip?: string;
+  domain?: string;
+  action?: string;
+  qtype?: string;
+  start_date?: string;
+  end_date?: string;
+}
+
+export interface AuditLog {
+  id: number;
+  admin: string;
+  action: string;
+  target: string;
+  details: string;
+  ip: string;
+  created_at: string;
+}
+
 // IP Enrichment
 export interface IPEnrichment {
   ip: string;
@@ -34,13 +55,23 @@ export interface IPReputationEntry {
 }
 
 // Query Log API
-export const getQueryLog = (params?: { page?: number; limit?: number; ip?: string; domain?: string }) => {
+export const getQueryLog = (params?: QueryLogSearchParams) => {
+  const p = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([key, val]) => {
+      if (val) p.set(key, String(val));
+    });
+  }
+  return req<PaginatedResponse<QueryLogEntry>>(`/api/query-logs?${p.toString()}`);
+};
+
+export const getAuditLogs = (params?: { page?: number; limit?: number; admin?: string; target?: string }) => {
   const p = new URLSearchParams();
   if (params?.page) p.set("page", String(params.page));
   if (params?.limit) p.set("limit", String(params.limit));
-  if (params?.ip) p.set("ip", params.ip);
-  if (params?.domain) p.set("domain", params.domain);
-  return req<PaginatedResponse<QueryLogEntry>>(`/api/querylog?${p.toString()}`);
+  if (params?.admin) p.set("admin", params.admin);
+  if (params?.target) p.set("target", params.target);
+  return req<PaginatedResponse<AuditLog>>(`/api/auditlogs?${p.toString()}`);
 };
 
 // IP Info API

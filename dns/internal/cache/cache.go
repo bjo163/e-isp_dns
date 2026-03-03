@@ -56,6 +56,10 @@ var (
 	// Whitelist cache: domains that must never be blocked
 	wlCache map[string]struct{}
 	wlMu    sync.RWMutex
+
+	// Branding cache (BlockPageURL)
+	blockPageURL string
+	bpMu         sync.RWMutex
 )
 
 // recordKey is domain+type for custom record lookup.
@@ -105,6 +109,7 @@ func Init(redisURL string, dbConn *gorm.DB) {
 	ReloadWhitelist(dbConn)
 	ReloadACL(dbConn)
 	ReloadRecords(dbConn)
+	ReloadBranding(dbConn)
 }
 
 // InitFromEnv reads REDIS_URL from the environment.
@@ -342,4 +347,32 @@ func LookupRecords(domain, qtype string) []RecordVal {
 	vals := recCache[k]
 	recMu.RUnlock()
 	return vals
+}
+
+// ── Branding Cache ──────────────────────────────────────────────────────────
+
+// ReloadBranding refreshes the cached branding values (like blockPageURL).
+func ReloadBranding(dbConn *gorm.DB) {
+	type row struct {
+		BlockPageURL string `gorm:"column:block_page_url"`
+	}
+	var r row
+	if err := dbConn.Table("brandings").First(&r, 1).Error; err == nil {
+		bp := r.BlockPageURL
+		// Environment override takes precedence if set
+		if env := os.Getenv("BLOCK_PAGE_URL"); env != "" {
+			bp = env
+		}
+		bpMu.Lock()
+		blockPageURL = bp
+		bpMu.Unlock()
+		log.Printf("cache: loaded branding (blockPageURL=%s)", bp)
+	}
+}
+
+// GetBlockPageURL returns the current configured block page URL.
+func GetBlockPageURL() string {
+	bpMu.RLock()
+	defer bpMu.RUnlock()
+	return blockPageURL
 }

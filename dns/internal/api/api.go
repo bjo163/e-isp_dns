@@ -17,6 +17,7 @@ import (
 	"github.com/truspositif/dns/internal/auth"
 	"github.com/truspositif/dns/internal/cache"
 	"github.com/truspositif/dns/internal/db"
+	"github.com/truspositif/dns/internal/dns"
 	"github.com/truspositif/dns/internal/importer"
 	"github.com/truspositif/dns/internal/metrics"
 	"github.com/truspositif/dns/internal/models"
@@ -24,7 +25,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-func New() *fiber.App {
+func New(dnsSrv *dns.Server) *fiber.App {
 	app := fiber.New(fiber.Config{AppName: "TrustPositif DNS Admin API"})
 	app.Use(logger.New())
 	// CORS: restrict to same-origin in production; allow * only via env override.
@@ -42,6 +43,10 @@ func New() *fiber.App {
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
+
+	// DNS-over-HTTPS (DoH) - RFC 8484
+	app.Get("/dns-query", func(c *fiber.Ctx) error { return handleDoH(c, dnsSrv) })
+	app.Post("/dns-query", func(c *fiber.Ctx) error { return handleDoH(c, dnsSrv) })
 	app.Post("/api/auth/login", limiter.New(limiter.Config{
 		Max:        10,
 		Expiration: time.Minute,
@@ -107,6 +112,16 @@ func New() *fiber.App {
 
 	// ── Protected (JWT) ──────────────────────────────────────────────────
 	v1 := app.Group("/api", auth.Middleware())
+
+	// API Hardening: Rate limiting per IP for sensitive endpoints (120 req/min)
+	v1.Use(limiter.New(limiter.Config{
+		Max:        120,
+		Expiration: time.Minute,
+		KeyGenerator: func(c *fiber.Ctx) string {
+			return c.IP()
+		},
+	}))
+
 	v1.Post("/auth/change-password", handleChangePassword)
 
 	// New endpoints: Query Log, IP Info, IP Reputation
@@ -174,6 +189,9 @@ func New() *fiber.App {
 	v1.Post("/whitelist", addWhitelist)
 	v1.Delete("/whitelist/:id", deleteWhitelist)
 
+	// Audit Logs
+	v1.Get("/auditlogs", handleAuditLogs)
+
 	return app
 }
 
@@ -202,6 +220,7 @@ func handleLogin(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "gagal membuat token"})
 	}
+	RecordAuditLog(c, "Login", user.Username, "Admin logged in")
 	return c.JSON(fiber.Map{"token": token, "username": user.Username, "must_change_password": user.MustChangePassword})
 }
 
@@ -233,6 +252,7 @@ func handleChangePassword(c *fiber.Ctx) error {
 	if err := db.DB.Model(&user).Updates(map[string]interface{}{"password_hash": string(hash), "must_change_password": false}).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
+	RecordAuditLog(c, "Change Password", user.Username, "Admin changed password")
 	return c.JSON(fiber.Map{"message": "password berhasil diubah"})
 }
 
@@ -257,6 +277,8 @@ func updateBranding(c *fiber.Ctx) error {
 	if err := db.DB.Save(&payload).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
+	RecordAuditLog(c, "Update Branding", "System", "Admin updated branding configuration")
+	go cache.ReloadBranding(db.DB)
 	return c.JSON(payload)
 }
 
@@ -316,6 +338,7 @@ func addDomain(c *fiber.Ctx) error {
 	if err := db.DB.Create(&d).Error; err != nil {
 		return c.Status(409).JSON(fiber.Map{"error": err.Error()})
 	}
+	RecordAuditLog(c, "Add Domain", d.Domain, fmt.Sprintf("Category: %s", d.Category))
 	go cache.Reload(db.DB)
 	return c.Status(201).JSON(d)
 }
@@ -332,15 +355,19 @@ func updateDomain(c *fiber.Ctx) error {
 	if err := db.DB.Save(&d).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
+	RecordAuditLog(c, "Update Domain", d.Domain, "Updated domain settings")
 	go cache.Reload(db.DB)
 	return c.JSON(d)
 }
 
 func deleteDomain(c *fiber.Ctx) error {
 	id := c.Params("id")
+	var d models.BlockedDomain
+	db.DB.First(&d, id)
 	if err := db.DB.Delete(&models.BlockedDomain{}, id).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
+	RecordAuditLog(c, "Delete Domain", d.Domain, "")
 	go cache.Reload(db.DB)
 	return c.SendStatus(204)
 }
@@ -353,6 +380,7 @@ func bulkDeleteDomains(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "ids required"})
 	}
 	result := db.DB.Where("id IN ?", body.IDs).Delete(&models.BlockedDomain{})
+	RecordAuditLog(c, "Bulk Delete Domains", fmt.Sprintf("%d domains", result.RowsAffected), "")
 	go cache.Reload(db.DB)
 	return c.JSON(fiber.Map{"deleted": result.RowsAffected})
 }
@@ -415,6 +443,7 @@ func addCategory(c *fiber.Ctx) error {
 	if err := db.DB.Create(&cat).Error; err != nil {
 		return c.Status(409).JSON(fiber.Map{"error": err.Error()})
 	}
+	RecordAuditLog(c, "Add Category", cat.Name, "")
 	return c.Status(201).JSON(cat)
 }
 
@@ -431,6 +460,7 @@ func updateCategory(c *fiber.Ctx) error {
 	if err := db.DB.Save(&cat).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
+	RecordAuditLog(c, "Update Category", cat.Name, "")
 	if oldName != cat.Name {
 		db.DB.Model(&models.BlockedDomain{}).Where("category = ?", oldName).Update("category", cat.Name)
 	}
@@ -440,9 +470,12 @@ func updateCategory(c *fiber.Ctx) error {
 
 func deleteCategory(c *fiber.Ctx) error {
 	id := c.Params("id")
+	var cat models.Category
+	db.DB.First(&cat, id)
 	if err := db.DB.Delete(&models.Category{}, id).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
+	RecordAuditLog(c, "Delete Category", cat.Name, "")
 	return c.SendStatus(204)
 }
 
@@ -497,6 +530,7 @@ func addClient(c *fiber.Ctx) error {
 	if err := db.DB.Create(&cl).Error; err != nil {
 		return c.Status(409).JSON(fiber.Map{"error": err.Error()})
 	}
+	RecordAuditLog(c, "Add Client", cl.IP, fmt.Sprintf("Name: %s", cl.Name))
 	go cache.ReloadACL(db.DB)
 	return c.Status(201).JSON(cl)
 }
@@ -513,15 +547,19 @@ func updateClient(c *fiber.Ctx) error {
 	if err := db.DB.Save(&cl).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
+	RecordAuditLog(c, "Update Client", cl.IP, fmt.Sprintf("Name: %s", cl.Name))
 	go cache.ReloadACL(db.DB)
 	return c.JSON(cl)
 }
 
 func deleteClient(c *fiber.Ctx) error {
 	id := c.Params("id")
+	var cl models.ACLClient
+	db.DB.First(&cl, id)
 	if err := db.DB.Delete(&models.ACLClient{}, id).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
+	RecordAuditLog(c, "Delete Client", cl.IP, "")
 	go cache.ReloadACL(db.DB)
 	return c.SendStatus(204)
 }
@@ -584,6 +622,7 @@ func addRecord(c *fiber.Ctx) error {
 	if err := db.DB.Create(&r).Error; err != nil {
 		return c.Status(409).JSON(fiber.Map{"error": err.Error()})
 	}
+	RecordAuditLog(c, "Add DNS Record", r.Name, fmt.Sprintf("%s -> %s", r.Type, r.Value))
 	go cache.ReloadRecords(db.DB)
 	return c.Status(201).JSON(r)
 }
@@ -601,15 +640,19 @@ func updateRecord(c *fiber.Ctx) error {
 	if err := db.DB.Save(&r).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
+	RecordAuditLog(c, "Update DNS Record", r.Name, fmt.Sprintf("%s -> %s", r.Type, r.Value))
 	go cache.ReloadRecords(db.DB)
 	return c.JSON(r)
 }
 
 func deleteRecord(c *fiber.Ctx) error {
 	id := c.Params("id")
+	var r models.CustomRecord
+	db.DB.First(&r, id)
 	if err := db.DB.Delete(&models.CustomRecord{}, id).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
+	RecordAuditLog(c, "Delete DNS Record", r.Name, "")
 	go cache.ReloadRecords(db.DB)
 	return c.SendStatus(204)
 }
@@ -657,6 +700,7 @@ func updateDNSConfig(c *fiber.Ctx) error {
 	if err := db.DB.Save(&cfg).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
+	RecordAuditLog(c, "Update DNS Config", "System", "Admin updated DNS configuration")
 	// Update ACL default policy from config
 	cache.SetACLDefault(cfg.ACLDefaultAllow)
 	return c.JSON(cfg)

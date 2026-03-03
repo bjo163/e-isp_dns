@@ -54,8 +54,11 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 
 	reason, category := s.lookupDomain(host)
 
+	// Use dynamic block page URL from cache
+	blockPageURL := cache.GetBlockPageURL()
+
 	// If block page URL is not configured, serve a minimal HTML fallback.
-	if s.BlockPageURL == "" {
+	if blockPageURL == "" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusForbidden)
 		fmt.Fprintf(w, "<h1>403 — Akses Diblokir</h1><p>%s</p>", host)
@@ -74,7 +77,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		params.Set("cat", category)
 	}
 
-	target := s.BlockPageURL
+	target := blockPageURL
 	if q := params.Encode(); q != "" {
 		target += "/?" + q
 	}
