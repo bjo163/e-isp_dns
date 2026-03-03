@@ -14,6 +14,7 @@ import (
 	"github.com/truspositif/dns/internal/metrics"
 	"github.com/truspositif/dns/internal/models"
 	"github.com/truspositif/dns/internal/scheduler"
+	"github.com/truspositif/dns/internal/reputation"
 )
 
 func main() {
@@ -47,6 +48,9 @@ func main() {
 	// 5. Start metrics sampler (1-sec ring buffer) + WebSocket hub
 	metrics.StartSampler()
 	metrics.RunHub()
+
+	// Start IP reputation sync scheduler
+	reputation.Start(db.DB)
 
 	// 6. Start analytics persistence (query log → SQLite) + auto-purge
 	analytics.Start(db.DB)

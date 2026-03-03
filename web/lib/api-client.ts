@@ -1,4 +1,54 @@
-﻿const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+﻿// Query Log Entry
+export interface QueryLogEntry {
+  id: number;
+  domain: string;
+  qtype: string;
+  action: string;
+  client: string;
+  latency_us: number;
+  created_at: string;
+}
+
+// IP Enrichment
+export interface IPEnrichment {
+  ip: string;
+  isp: string;
+  org: string;
+  asn: string;
+  country: string;
+  country_code: string;
+  city: string;
+  lat: number;
+  lon: number;
+  fetched_at: string;
+}
+
+// IP Reputation Entry
+export interface IPReputationEntry {
+  id: number;
+  ip: string;
+  cidr: string;
+  source: string;
+  reason: string;
+  updated_at: string;
+}
+
+// Query Log API
+export const getQueryLog = (params?: { page?: number; limit?: number; ip?: string; domain?: string }) => {
+  const p = new URLSearchParams();
+  if (params?.page) p.set("page", String(params.page));
+  if (params?.limit) p.set("limit", String(params.limit));
+  if (params?.ip) p.set("ip", params.ip);
+  if (params?.domain) p.set("domain", params.domain);
+  return req<PaginatedResponse<QueryLogEntry>>(`/api/querylog?${p.toString()}`);
+};
+
+// IP Info API
+export const getIPInfo = (ip: string) => req<IPEnrichment>(`/api/ipinfo?ip=${encodeURIComponent(ip)}`);
+
+// IP Reputation API
+export const getIPReputation = (ip: string) => req<IPReputationEntry[]>(`/api/reputation?ip=${encodeURIComponent(ip)}`);
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 //  Token helpers (browser only) 
 export const getToken  = () => (typeof window !== "undefined" ? localStorage.getItem("admin_token") : null);

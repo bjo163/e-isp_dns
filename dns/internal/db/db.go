@@ -40,6 +40,9 @@ if err := DB.AutoMigrate(
 &models.CustomRecord{},
 &models.QueryLogEntry{},
 &models.BlocklistSubscription{},
+&models.IPEnrichment{},
+&models.IPReputationEntry{},
+&models.IPReputationSource{},
 ); err != nil {
 log.Fatalf("db: auto-migrate failed: %v", err)
 }

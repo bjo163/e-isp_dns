@@ -1,4 +1,5 @@
-﻿package api
+﻿
+package api
 
 import (
 	"encoding/csv"
@@ -102,6 +103,14 @@ func New() *fiber.App {
 	// ── Protected (JWT) ──────────────────────────────────────────────────
 	v1 := app.Group("/api", auth.Middleware())
 	v1.Post("/auth/change-password", handleChangePassword)
+
+	// New endpoints: Query Log, IP Info, IP Reputation
+	v1.Get("/querylog", handleQueryLog)
+	v1.Get("/ipinfo", handleIPInfo)
+	v1.Get("/reputation", handleReputation)
+
+
+
 
 	// Branding
 	v1.Get("/branding", getBranding)

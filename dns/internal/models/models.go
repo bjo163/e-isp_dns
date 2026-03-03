@@ -187,3 +187,40 @@ LastError     string     `json:"last_error"`
 CreatedAt     time.Time  `json:"created_at"`
 UpdatedAt     time.Time  `json:"updated_at"`
 }
+
+// IPEnrichment caches public IP info for clients (ISP, ASN, country, city, org).
+type IPEnrichment struct {
+	IP          string    `gorm:"primaryKey;uniqueIndex;not null" json:"ip"`
+	ISP         string    `json:"isp"`
+	Org         string    `json:"org"`
+	ASN         string    `json:"asn"`
+	Country     string    `json:"country"`
+	CountryCode string    `json:"country_code"`
+	City        string    `json:"city"`
+	Lat         float64   `json:"lat"`
+	Lon         float64   `json:"lon"`
+	FetchedAt   time.Time `json:"fetched_at"`
+}
+
+// IPReputationEntry stores a single IP or CIDR from a blacklist source.
+type IPReputationEntry struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	IP        string    `gorm:"index" json:"ip"`      // for single IP
+	CIDR      string    `gorm:"index" json:"cidr"`    // for CIDR blocks
+	Source    string    `gorm:"index" json:"source"`  // e.g. "Spamhaus DROP"
+	Reason    string    `json:"reason"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// IPReputationSource configures a blacklist source for auto-sync.
+type IPReputationSource struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	Name       string    `gorm:"uniqueIndex;not null" json:"name"`
+	URL        string    `json:"url"`
+	Format     string    `json:"format"` // "ip", "cidr", "mixed"
+	Enabled    bool      `gorm:"default:true" json:"enabled"`
+	LastRunAt  *time.Time `json:"last_run_at"`
+	LastCount  int64     `json:"last_count"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}

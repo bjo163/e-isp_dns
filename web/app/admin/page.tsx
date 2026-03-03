@@ -22,28 +22,27 @@ import {
   type CustomRecord, type BlocklistPreset, type ClientStat,
 } from "@/lib/api-client";
 import { LiveMetrics } from "@/components/sections/LiveMetrics";
-import { AnalyticsTab } from "@/components/sections/AnalyticsTab";
+import { BlocklistsTab } from "@/components/tabs/BlocklistsTab";
+import { AccessControlTab } from "@/components/tabs/AccessControlTab";
+import { QueryLogTab } from "@/components/tabs/QueryLogTab";
+import { BlockPageTab } from "@/components/tabs/BlockPageTab";
+import { SettingsTab } from "@/components/tabs/SettingsTab";
 import { SubscriptionsTab } from "@/components/sections/SubscriptionsTab";
 
 //  Toast helper 
 type Toast = { id: number; msg: string; type: "ok" | "err" };
 let _tid = 0;
 
-//  Tabs 
-type Tab = "overview" | "analytics" | "branding" | "isp" | "domains" | "subscriptions" | "categories" | "clients" | "records" | "dns" | "security";
+//  Tabs (refactored)
+type Tab = "overview" | "blocklists" | "acl" | "querylog" | "blockpage" | "settings" | "domains" | "records" | "subscriptions" | "categories" | "clients" | "dns" | "security";
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: "overview",       label: "Overview",        icon: <Radio className="w-3.5 h-3.5" /> },
-  { id: "analytics",      label: "Analytics",       icon: <BarChart3 className="w-3.5 h-3.5" /> },
-  { id: "branding",       label: "Branding",        icon: <Shield className="w-3.5 h-3.5" /> },
-  { id: "isp",            label: "ISP Config",      icon: <Wifi className="w-3.5 h-3.5" /> },
-  { id: "domains",        label: "Blokir Domain",   icon: <Globe className="w-3.5 h-3.5" /> },
-  { id: "subscriptions",  label: "Subscriptions",   icon: <CalendarClock className="w-3.5 h-3.5" /> },
-  { id: "categories",     label: "Kategori",        icon: <Tags className="w-3.5 h-3.5" /> },
-  { id: "clients",        label: "Clients / ACL",   icon: <Users className="w-3.5 h-3.5" /> },
-  { id: "records",        label: "DNS Records",     icon: <FileText className="w-3.5 h-3.5" /> },
-  { id: "dns",            label: "DNS Config",      icon: <Server className="w-3.5 h-3.5" /> },
-  { id: "security",       label: "Keamanan",        icon: <KeyRound className="w-3.5 h-3.5" /> },
+  { id: "overview",   label: "Overview",    icon: <Radio className="w-3.5 h-3.5" /> },
+  { id: "blocklists", label: "Blocklists",  icon: <Globe className="w-3.5 h-3.5" /> },
+  { id: "acl",        label: "Access Ctrl", icon: <Users className="w-3.5 h-3.5" /> },
+  { id: "querylog",   label: "Query Log",   icon: <FileText className="w-3.5 h-3.5" /> },
+  { id: "blockpage",  label: "Block Page",  icon: <Shield className="w-3.5 h-3.5" /> },
+  { id: "settings",   label: "Settings",    icon: <Server className="w-3.5 h-3.5" /> },
 ];
 
 //  Reusable Field 
@@ -492,16 +491,7 @@ export default function AdminPage() {
               {tab === t.id && <span className="absolute left-0 top-1 bottom-1 w-0.5 rounded-r" style={{ background: "var(--brand-primary)" }} />}
               {t.icon}
               {t.label}
-              {t.id === "domains" && domainTotal > 0 && (
-                <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ background: "var(--brand-border)", color: "var(--brand-muted)" }}>
-                  {domainTotal.toLocaleString()}
-                </span>
-              )}
-              {t.id === "records" && recordTotal > 0 && (
-                <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ background: "var(--brand-border)", color: "var(--brand-muted)" }}>
-                  {recordTotal}
-                </span>
-              )}
+              {/* No badge for domains/records tab: not present in TABS */}
             </button>
           ))}
 
@@ -546,174 +536,33 @@ export default function AdminPage() {
             </div>
           ) : (
             <>
-              {/*  OVERVIEW  */}
-              {tab === "overview" && branding && dnsConfig && (
-                <div className="space-y-6">
+              {/* OVERVIEW */}
+              {tab === "overview" && (
+                <div>
                   <SectionTitle title="Overview" sub="Status sistem dan ringkasan konfigurasi aktif" />
-
-                  {/* Live Metrics (compact, WebSocket) */}
                   <LiveMetrics compact />
-
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {[
-                      { label: "Total Domain", value: domainTotal.toLocaleString(), icon: <Globe className="w-4 h-4" /> },
-                      { label: "Kategori",     value: categories.length,            icon: <Tags className="w-4 h-4" /> },
-                      { label: "ACL Clients",  value: clients.length,               icon: <Users className="w-4 h-4" /> },
-                      { label: "DNS Records",  value: recordTotal,                  icon: <FileText className="w-4 h-4" /> },
-                    ].map(stat => (
-                      <div key={stat.label} className="border rounded p-4 space-y-2"
-                        style={{ borderColor: "var(--brand-border)", background: "var(--brand-card-bg)" }}>
-                        <div className="flex items-center justify-between">
-                          <span className="text-[9px] tracking-widest uppercase" style={{ color: "var(--brand-muted)" }}>{stat.label}</span>
-                          <span style={{ color: "var(--brand-muted)" }}>{stat.icon}</span>
-                        </div>
-                        <p className="text-2xl font-bold tabular-nums">{stat.value}</p>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="border rounded" style={{ borderColor: "var(--brand-border)" }}>
-                    <div className="px-4 py-3 border-b" style={{ borderColor: "var(--brand-border)" }}>
-                      <p className="text-[10px] font-bold tracking-[0.15em] uppercase" style={{ color: "var(--brand-muted)" }}>Konfigurasi Aktif</p>
-                    </div>
-                    <div className="divide-y" style={{ borderColor: "var(--brand-border)" }}>
-                      {[
-                        ["ISP",              `${branding.isp_name} [${branding.isp_as_number}]`],
-                        ["Block Page URL",   branding.block_page_url],
-                        ["Redirect IP",      dnsConfig.redirect_ip],
-                        ["Upstream DNS",     dnsConfig.upstream_dns],
-                        ["API Port",         `:${dnsConfig.http_port}`],
-                        ["ACL Default",      dnsConfig.acl_default_allow ? "Allow All" : "Block All"],
-                      ].map(([k, v]) => (
-                        <div key={k} className="flex items-center justify-between px-4 py-3">
-                          <span className="text-xs" style={{ color: "var(--brand-muted)" }}>{k}</span>
-                          <span className="text-xs font-mono">{v}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               )}
 
-              {/*  ANALYTICS  */}
-              {tab === "analytics" && <AnalyticsTab />}
+              {/* BLOCKLISTS */}
+              {tab === "blocklists" && <BlocklistsTab />}
 
-              {/*  BRANDING  */}
-              {tab === "branding" && branding && (
-                <div className="max-w-2xl space-y-8">
-                  <SectionTitle title="Branding" sub="Konfigurasi tampilan halaman block - semua teks dapat dikustomisasi" />
+              {/* ACCESS CONTROL */}
+              {tab === "acl" && <AccessControlTab />}
 
-                  {/* Umum */}
-                  <div className="space-y-4 border rounded p-5" style={{ borderColor: "var(--brand-border)" }}>
-                    <CardHeader label="Umum" />
-                    <Field label="Nama Situs" value={branding.site_name} onChange={v => setBranding(b => b && { ...b, site_name: v })} />
-                    <Field label="URL Halaman Block" value={branding.block_page_url} onChange={v => setBranding(b => b && { ...b, block_page_url: v })} mono />
-                    <div className="grid grid-cols-2 gap-4">
-                      <ColorField label="Primary Color" value={branding.primary_color} onChange={v => setBranding(b => b && { ...b, primary_color: v })} />
-                      <ColorField label="Accent Color"  value={branding.accent_color}  onChange={v => setBranding(b => b && { ...b, accent_color: v })} />
-                    </div>
-                  </div>
+              {/* QUERY LOG */}
+              {tab === "querylog" && <QueryLogTab />}
 
-                  {/* Hero / Teks Halaman Block */}
-                  <div className="space-y-4 border rounded p-5" style={{ borderColor: "var(--brand-border)" }}>
-                    <CardHeader label="Hero & Teks Halaman Block" />
-                    <Field label="Judul Hero" value={branding.hero_title} onChange={v => setBranding(b => b && { ...b, hero_title: v })} />
-                    <Field label="Subjudul Hero" value={branding.hero_subtitle} onChange={v => setBranding(b => b && { ...b, hero_subtitle: v })} textarea />
-                    <Field label="Teks Badge Peringatan" value={branding.warning_badge_text} onChange={v => setBranding(b => b && { ...b, warning_badge_text: v })} />
-                    <Field label="Placeholder URL Diblokir" value={branding.blocked_url_placeholder} onChange={v => setBranding(b => b && { ...b, blocked_url_placeholder: v })} mono />
-                    <Field label="Alasan Blokir Default" value={branding.default_reason} onChange={v => setBranding(b => b && { ...b, default_reason: v })} />
-                    <Field label="Teks Catatan / Notice" value={branding.notice_text} onChange={v => setBranding(b => b && { ...b, notice_text: v })} textarea />
-                  </div>
+              {/* BLOCK PAGE */}
+              {tab === "blockpage" && <BlockPageTab />}
 
-                  {/* Section Kategori */}
-                  <div className="space-y-4 border rounded p-5" style={{ borderColor: "var(--brand-border)" }}>
-                    <CardHeader label="Section Kategori Konten" />
-                    <Field label="Judul Section" value={branding.category_title} onChange={v => setBranding(b => b && { ...b, category_title: v })} />
-                    <Field label="Deskripsi Section" value={branding.category_subtitle} onChange={v => setBranding(b => b && { ...b, category_subtitle: v })} textarea />
-                  </div>
+              {/* SETTINGS */}
+              {tab === "settings" && <SettingsTab />}
 
-                  {/* Section Banding */}
-                  <div className="space-y-4 border rounded p-5" style={{ borderColor: "var(--brand-border)" }}>
-                    <CardHeader label="Section Banding / Appeal" />
-                    <Field label="Judul Section Banding" value={branding.appeal_title} onChange={v => setBranding(b => b && { ...b, appeal_title: v })} />
-                    <Field label="Deskripsi Banding" value={branding.appeal_subtitle} onChange={v => setBranding(b => b && { ...b, appeal_subtitle: v })} textarea />
-                    <div className="grid grid-cols-2 gap-4">
-                      <Field label="Label Portal Banding" value={branding.appeal_portal_label} onChange={v => setBranding(b => b && { ...b, appeal_portal_label: v })} />
-                      <NumberField label="Estimasi Proses (hari)" value={branding.appeal_process_days} onChange={v => setBranding(b => b && { ...b, appeal_process_days: v })} />
-                    </div>
-                  </div>
-
-                  {/* Section Kontak */}
-                  <div className="space-y-4 border rounded p-5" style={{ borderColor: "var(--brand-border)" }}>
-                    <CardHeader label="Section Kontak" />
-                    <Field label="Judul Section Kontak" value={branding.contact_title} onChange={v => setBranding(b => b && { ...b, contact_title: v })} />
-                    <Field label="Deskripsi Kontak" value={branding.contact_subtitle} onChange={v => setBranding(b => b && { ...b, contact_subtitle: v })} textarea />
-                  </div>
-
-                  {/* Footer */}
-                  <div className="space-y-4 border rounded p-5" style={{ borderColor: "var(--brand-border)" }}>
-                    <CardHeader label="Footer" />
-                    <Field label="Teks Legal Footer" value={branding.footer_legal} onChange={v => setBranding(b => b && { ...b, footer_legal: v })} textarea />
-                  </div>
-
-                  {/* Regulator */}
-                  <div className="space-y-4 border rounded p-5" style={{ borderColor: "var(--brand-border)" }}>
-                    <CardHeader label="Regulator (Komdigi)" />
-                    <Field label="Nama Lengkap"     value={branding.authority_name}      onChange={v => setBranding(b => b && { ...b, authority_name: v })} />
-                    <Field label="Nama Singkat"     value={branding.authority_short_name} onChange={v => setBranding(b => b && { ...b, authority_short_name: v })} />
-                    <Field label="Logo URL"         value={branding.authority_logo}       onChange={v => setBranding(b => b && { ...b, authority_logo: v })} mono />
-                    <Field label="Alamat"           value={branding.authority_address}    onChange={v => setBranding(b => b && { ...b, authority_address: v })} />
-                    <div className="grid grid-cols-2 gap-4">
-                      <Field label="Telepon" value={branding.authority_phone} onChange={v => setBranding(b => b && { ...b, authority_phone: v })} />
-                      <Field label="Email"   value={branding.authority_email} onChange={v => setBranding(b => b && { ...b, authority_email: v })} />
-                    </div>
-                    <Field label="Website"          value={branding.authority_website}   onChange={v => setBranding(b => b && { ...b, authority_website: v })} mono />
-                    <Field label="TrustPositif URL" value={branding.trustpositif_url}    onChange={v => setBranding(b => b && { ...b, trustpositif_url: v })} mono />
-                  </div>
-
-                  {/* Aset Logo */}
-                  <div className="space-y-4 border rounded p-5" style={{ borderColor: "var(--brand-border)" }}>
-                    <CardHeader label="Aset Logo Resmi" />
-                    <Field label="Komdigi Logo URL"       value={branding.komdigi_logo}      onChange={v => setBranding(b => b && { ...b, komdigi_logo: v })} mono />
-                    <Field label="Cyber Drone 9 Logo URL" value={branding.cyber_drone9_logo} onChange={v => setBranding(b => b && { ...b, cyber_drone9_logo: v })} mono />
-                    <Field label="AduanKonten Logo URL"   value={branding.aduan_konten_logo} onChange={v => setBranding(b => b && { ...b, aduan_konten_logo: v })} mono />
-                    <div className="grid grid-cols-2 gap-4">
-                      <Field label="AduanKonten URL" value={branding.aduan_konten_url} onChange={v => setBranding(b => b && { ...b, aduan_konten_url: v })} mono />
-                      <Field label="CyberDrone9 URL" value={branding.cyber_drone9_url} onChange={v => setBranding(b => b && { ...b, cyber_drone9_url: v })} mono />
-                    </div>
-                  </div>
-
-                  <SaveBtn loading={saving} onClick={saveBranding} />
-                </div>
-              )}
+              {/* Branding tab removed: not present in TABS */}
 
               {/*  ISP CONFIG  */}
-              {tab === "isp" && branding && (
-                <div className="max-w-2xl space-y-6">
-                  <SectionTitle title="ISP Config" sub="Data Internet Service Provider yang ditampilkan di halaman block" />
-
-                  <div className="space-y-4 border rounded p-5" style={{ borderColor: "var(--brand-border)" }}>
-                    <Field label="Nama ISP"     value={branding.isp_name}       onChange={v => setBranding(b => b && { ...b, isp_name: v })} />
-                    <Field label="Nama Singkat" value={branding.isp_short_name} onChange={v => setBranding(b => b && { ...b, isp_short_name: v })} />
-                    <Field label="AS Number"    value={branding.isp_as_number}  onChange={v => setBranding(b => b && { ...b, isp_as_number: v })} mono />
-                    <Field label="Logo URL"     value={branding.isp_logo}       onChange={v => setBranding(b => b && { ...b, isp_logo: v })} mono />
-                    {branding.isp_logo && (
-                      <div className="flex items-center gap-3 p-3 border rounded" style={{ borderColor: "var(--brand-border)", background: "#fff" }}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={branding.isp_logo} alt="ISP Logo Preview" className="h-8 w-auto object-contain" />
-                        <span className="text-xs" style={{ color: "#555" }}>Preview logo</span>
-                      </div>
-                    )}
-                    <div className="grid grid-cols-2 gap-4">
-                      <Field label="Helpline" value={branding.isp_helpline} onChange={v => setBranding(b => b && { ...b, isp_helpline: v })} />
-                      <Field label="Email"    value={branding.isp_email}    onChange={v => setBranding(b => b && { ...b, isp_email: v })} />
-                    </div>
-                    <Field label="Website" value={branding.isp_website} onChange={v => setBranding(b => b && { ...b, isp_website: v })} mono />
-                  </div>
-
-                  <SaveBtn loading={saving} onClick={saveBranding} />
-                </div>
-              )}
+              {/* ISP tab removed: not present in TABS */}
 
               {/*  BLOCKED DOMAINS (PAGINATED)  */}
               {tab === "domains" && (
