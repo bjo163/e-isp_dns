@@ -7,39 +7,43 @@ import {
   Shield, Globe, Radio, Wifi, Plus, Trash2,
   Save, RefreshCw, AlertTriangle, CheckCircle2, XCircle, Eye, EyeOff,
   ChevronRight, ChevronLeft, Server, LogOut, KeyRound, Download,
-  Users, Tags, FileText, Search,
+  Users, Tags, FileText, Search, BarChart3, CalendarClock, Activity,
 } from "lucide-react";
 import {
   getBranding, updateBranding, getDomains, addDomain, deleteDomain,
   getDNSConfig, updateDNSConfig, updateDomain, importDomains, changePassword,
   getToken, clearToken,
   getCategories, addCategory, deleteCategory,
-  getClients, getDetectedClients, addClient, deleteClient,
+  getClients, getDetectedClients, addClient, updateClient, deleteClient,
   getRecords, addRecord, updateRecord, deleteRecord,
-  getPresets,
+  getPresets, getClientStats,
   type Branding, type BlockedDomain, type DNSConfig, type NewDomain, type ImportResult,
   type Category, type ACLClient, type DetectedClient,
-  type CustomRecord, type BlocklistPreset,
+  type CustomRecord, type BlocklistPreset, type ClientStat,
 } from "@/lib/api-client";
 import { LiveMetrics } from "@/components/sections/LiveMetrics";
+import { AnalyticsTab } from "@/components/sections/AnalyticsTab";
+import { SubscriptionsTab } from "@/components/sections/SubscriptionsTab";
 
 //  Toast helper 
 type Toast = { id: number; msg: string; type: "ok" | "err" };
 let _tid = 0;
 
 //  Tabs 
-type Tab = "overview" | "branding" | "isp" | "domains" | "categories" | "clients" | "records" | "dns" | "security";
+type Tab = "overview" | "analytics" | "branding" | "isp" | "domains" | "subscriptions" | "categories" | "clients" | "records" | "dns" | "security";
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: "overview",    label: "Overview",        icon: <Radio className="w-3.5 h-3.5" /> },
-  { id: "branding",    label: "Branding",        icon: <Shield className="w-3.5 h-3.5" /> },
-  { id: "isp",         label: "ISP Config",      icon: <Wifi className="w-3.5 h-3.5" /> },
-  { id: "domains",     label: "Blokir Domain",   icon: <Globe className="w-3.5 h-3.5" /> },
-  { id: "categories",  label: "Kategori",        icon: <Tags className="w-3.5 h-3.5" /> },
-  { id: "clients",     label: "Clients / ACL",   icon: <Users className="w-3.5 h-3.5" /> },
-  { id: "records",     label: "DNS Records",     icon: <FileText className="w-3.5 h-3.5" /> },
-  { id: "dns",         label: "DNS Config",      icon: <Server className="w-3.5 h-3.5" /> },
-  { id: "security",    label: "Keamanan",        icon: <KeyRound className="w-3.5 h-3.5" /> },
+  { id: "overview",       label: "Overview",        icon: <Radio className="w-3.5 h-3.5" /> },
+  { id: "analytics",      label: "Analytics",       icon: <BarChart3 className="w-3.5 h-3.5" /> },
+  { id: "branding",       label: "Branding",        icon: <Shield className="w-3.5 h-3.5" /> },
+  { id: "isp",            label: "ISP Config",      icon: <Wifi className="w-3.5 h-3.5" /> },
+  { id: "domains",        label: "Blokir Domain",   icon: <Globe className="w-3.5 h-3.5" /> },
+  { id: "subscriptions",  label: "Subscriptions",   icon: <CalendarClock className="w-3.5 h-3.5" /> },
+  { id: "categories",     label: "Kategori",        icon: <Tags className="w-3.5 h-3.5" /> },
+  { id: "clients",        label: "Clients / ACL",   icon: <Users className="w-3.5 h-3.5" /> },
+  { id: "records",        label: "DNS Records",     icon: <FileText className="w-3.5 h-3.5" /> },
+  { id: "dns",            label: "DNS Config",      icon: <Server className="w-3.5 h-3.5" /> },
+  { id: "security",       label: "Keamanan",        icon: <KeyRound className="w-3.5 h-3.5" /> },
 ];
 
 //  Reusable Field 
@@ -162,7 +166,11 @@ export default function AdminPage() {
   // Clients / ACL
   const [clients, setClients] = useState<ACLClient[]>([]);
   const [detected, setDetected] = useState<DetectedClient[]>([]);
-  const [newClient, setNewClient] = useState({ ip: "", name: "", action: "allow", notes: "" });
+  const [newClient, setNewClient] = useState({ ip: "", name: "", action: "allow", blocked_categories: "", notes: "" });
+
+  // Per-client stats
+  const [clientStatsIp, setClientStatsIp] = useState<string | null>(null);
+  const [clientStat, setClientStat] = useState<ClientStat | null>(null);
 
   // Custom DNS Records (paginated)
   const [records, setRecords]       = useState<CustomRecord[]>([]);
@@ -358,7 +366,7 @@ export default function AdminPage() {
       const c = await addClient(newClient);
       setClients(prev => [...prev, c]);
       setDetected(prev => prev.filter(d => d.ip !== newClient.ip));
-      setNewClient({ ip: "", name: "", action: "allow", notes: "" });
+      setNewClient({ ip: "", name: "", action: "allow", blocked_categories: "", notes: "" });
       toast("Client ditambahkan");
     } catch (e: unknown) { toast((e as Error).message, "err"); }
   }
@@ -586,6 +594,9 @@ export default function AdminPage() {
                   </div>
                 </div>
               )}
+
+              {/*  ANALYTICS  */}
+              {tab === "analytics" && <AnalyticsTab />}
 
               {/*  BRANDING  */}
               {tab === "branding" && branding && (
@@ -870,6 +881,9 @@ export default function AdminPage() {
                 </div>
               )}
 
+              {/*  SUBSCRIPTIONS  */}
+              {tab === "subscriptions" && <SubscriptionsTab toast={toast} />}
+
               {/*  CATEGORIES  */}
               {tab === "categories" && (
                 <div className="max-w-3xl space-y-6">
@@ -944,8 +958,8 @@ export default function AdminPage() {
 
               {/*  CLIENTS / ACL  */}
               {tab === "clients" && (
-                <div className="max-w-3xl space-y-6">
-                  <SectionTitle title="Clients / ACL" sub="Kontrol akses client berdasarkan IP — default: Allow All" />
+                <div className="max-w-4xl space-y-6">
+                  <SectionTitle title="Clients / ACL" sub="Kontrol akses client berdasarkan IP — default: Allow All. Block bisa pilih kategori tertentu." />
 
                   {/* Detected clients */}
                   {detected.length > 0 && (
@@ -991,6 +1005,34 @@ export default function AdminPage() {
                         className="px-3 py-2 text-sm border rounded bg-transparent outline-none"
                         style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
                     </div>
+                    {newClient.action === "block" && (
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-bold tracking-[0.15em] uppercase" style={{ color: "var(--brand-muted)" }}>
+                          Blokir Kategori (kosong = blokir semua DNS)
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {categories.map(cat => {
+                            const selected = newClient.blocked_categories.split(",").filter(Boolean).includes(cat.name);
+                            return (
+                              <button key={cat.id} type="button"
+                                onClick={() => {
+                                  const cats = newClient.blocked_categories.split(",").filter(Boolean);
+                                  const next = selected ? cats.filter(c => c !== cat.name) : [...cats, cat.name];
+                                  setNewClient(c => ({ ...c, blocked_categories: next.join(",") }));
+                                }}
+                                className="px-2.5 py-1 text-[10px] font-medium rounded border transition-all"
+                                style={{
+                                  borderColor: selected ? (cat.color || "var(--brand-accent)") : "var(--brand-border)",
+                                  color: selected ? cat.color || "var(--brand-accent)" : "var(--brand-muted)",
+                                  background: selected ? `${cat.color || "var(--brand-accent)"}15` : "transparent",
+                                }}>
+                                {cat.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                     <button type="submit"
                       className="flex items-center gap-2 px-4 py-2 text-xs font-bold tracking-widest uppercase border transition-all"
                       style={{ color: "var(--brand-accent)", borderColor: "var(--brand-accent)", background: "rgba(99,102,241,0.06)" }}>
@@ -1002,11 +1044,12 @@ export default function AdminPage() {
                   <div className="border rounded overflow-hidden" style={{ borderColor: "var(--brand-border)" }}>
                     <div className="grid grid-cols-12 px-4 py-2 border-b text-[9px] font-bold tracking-[0.15em] uppercase"
                       style={{ borderColor: "var(--brand-border)", color: "var(--brand-muted)", background: "var(--brand-card-bg)" }}>
-                      <div className="col-span-3">IP</div>
-                      <div className="col-span-3">Nama</div>
-                      <div className="col-span-2">Aksi</div>
-                      <div className="col-span-3">Catatan</div>
-                      <div className="col-span-1 text-right">Hapus</div>
+                      <div className="col-span-2">IP</div>
+                      <div className="col-span-2">Nama</div>
+                      <div className="col-span-1">Aksi</div>
+                      <div className="col-span-3">Kategori Block</div>
+                      <div className="col-span-2">Catatan</div>
+                      <div className="col-span-2 text-right">Aksi</div>
                     </div>
                     {clients.length === 0 ? (
                       <div className="px-4 py-10 text-center text-xs" style={{ color: "var(--brand-muted)" }}>
@@ -1015,16 +1058,45 @@ export default function AdminPage() {
                     ) : clients.map(c => (
                       <div key={c.id} className="grid grid-cols-12 px-4 py-3 border-b last:border-0 items-center hover:bg-white/[0.02]"
                         style={{ borderColor: "var(--brand-border)" }}>
-                        <div className="col-span-3 text-xs font-mono">{c.ip}</div>
-                        <div className="col-span-3 text-xs" style={{ color: "var(--brand-muted)" }}>{c.name || "-"}</div>
-                        <div className="col-span-2">
+                        <div className="col-span-2 text-xs font-mono">{c.ip}</div>
+                        <div className="col-span-2 text-xs" style={{ color: "var(--brand-muted)" }}>{c.name || "-"}</div>
+                        <div className="col-span-1">
                           <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${c.action === "allow" ? "text-green-400" : "text-red-400"}`}
                             style={{ background: c.action === "allow" ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)" }}>
                             {c.action}
                           </span>
                         </div>
-                        <div className="col-span-3 text-xs truncate" style={{ color: "var(--brand-muted)" }}>{c.notes || "-"}</div>
-                        <div className="col-span-1 flex justify-end">
+                        <div className="col-span-3">
+                          {c.action === "block" ? (
+                            c.blocked_categories ? (
+                              <div className="flex flex-wrap gap-1">
+                                {c.blocked_categories.split(",").filter(Boolean).map(cat => (
+                                  <span key={cat} className="text-[9px] px-1.5 py-0.5 rounded border"
+                                    style={{ borderColor: "var(--brand-border)", color: "var(--brand-muted)" }}>
+                                    {cat}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-[9px] italic" style={{ color: "var(--brand-muted)" }}>(Blokir semua)</span>
+                            )
+                          ) : (
+                            <span className="text-[9px]" style={{ color: "var(--brand-muted)" }}>—</span>
+                          )}
+                        </div>
+                        <div className="col-span-2 text-xs truncate" style={{ color: "var(--brand-muted)" }}>{c.notes || "-"}</div>
+                        <div className="col-span-2 flex items-center justify-end gap-1.5">
+                          <button onClick={async () => {
+                            setClientStatsIp(c.ip);
+                            setClientStat(null);
+                            try {
+                              const cs = await getClientStats(c.ip);
+                              setClientStat(cs);
+                            } catch { /* silent */ }
+                          }} title="Lihat stats"
+                            className="hover:text-blue-400 transition-colors" style={{ color: "var(--brand-muted)" }}>
+                            <Activity className="w-3.5 h-3.5" />
+                          </button>
                           <button onClick={() => handleDeleteClient(c.id)} className="hover:text-red-400 transition-colors" style={{ color: "var(--brand-muted)" }}>
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -1032,6 +1104,40 @@ export default function AdminPage() {
                       </div>
                     ))}
                   </div>
+
+                  {/* Per-client stats panel */}
+                  {clientStatsIp && (
+                    <div className="border rounded p-5 space-y-4" style={{ borderColor: "var(--brand-accent)", background: "var(--brand-card-bg)" }}>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-[10px] font-bold tracking-[0.15em] uppercase" style={{ color: "var(--brand-muted)" }}>Stats: {clientStatsIp}</p>
+                        </div>
+                        <button onClick={() => setClientStatsIp(null)} className="hover:text-foreground transition-colors" style={{ color: "var(--brand-muted)" }}>
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                      </div>
+                      {clientStat ? (
+                        <div className="grid grid-cols-3 gap-4">
+                          <div className="border rounded p-3 text-center" style={{ borderColor: "var(--brand-border)" }}>
+                            <p className="text-[9px] tracking-widest uppercase" style={{ color: "var(--brand-muted)" }}>Total</p>
+                            <p className="text-lg font-bold tabular-nums mt-1" style={{ color: "#6366f1" }}>{clientStat.total_queries.toLocaleString()}</p>
+                          </div>
+                          <div className="border rounded p-3 text-center" style={{ borderColor: "var(--brand-border)" }}>
+                            <p className="text-[9px] tracking-widest uppercase" style={{ color: "var(--brand-muted)" }}>Blocked</p>
+                            <p className="text-lg font-bold tabular-nums mt-1" style={{ color: "#ef4444" }}>{clientStat.blocked_count.toLocaleString()}</p>
+                          </div>
+                          <div className="border rounded p-3 text-center" style={{ borderColor: "var(--brand-border)" }}>
+                            <p className="text-[9px] tracking-widest uppercase" style={{ color: "var(--brand-muted)" }}>Forwarded</p>
+                            <p className="text-lg font-bold tabular-nums mt-1" style={{ color: "#22c55e" }}>{clientStat.forwarded_count.toLocaleString()}</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center py-6">
+                          <RefreshCw className="w-5 h-5 animate-spin" style={{ color: "var(--brand-muted)" }} />
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 

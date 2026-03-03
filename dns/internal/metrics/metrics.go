@@ -171,7 +171,21 @@ var (
 	qlogLen  int
 	qlogMu   sync.RWMutex
 	qlogCh   = make(chan QueryLog, 512) // buffered — DNS handler never blocks
+
+	// Subscribers get a copy of every query log entry (for analytics persistence).
+	subsMu   sync.Mutex
+	subs     []chan QueryLog
 )
+
+// SubscribeQueryLog returns a channel that receives a copy of every QueryLog.
+// The channel is buffered (1024) — if the subscriber is slow, entries are dropped.
+func SubscribeQueryLog() <-chan QueryLog {
+	ch := make(chan QueryLog, 1024)
+	subsMu.Lock()
+	subs = append(subs, ch)
+	subsMu.Unlock()
+	return ch
+}
 
 // LogQuery submits a query log entry. Non-blocking: if buffer is full the
 // entry is silently discarded.  Call from the DNS handler hot path.
@@ -183,7 +197,7 @@ func LogQuery(ql QueryLog) {
 }
 
 // drainQueryLog runs in a background goroutine, reading from the channel
-// and writing into the ring buffer.
+// and writing into the ring buffer.  Also fans out to analytics subscribers.
 func drainQueryLog() {
 	for ql := range qlogCh {
 		qlogMu.Lock()
@@ -193,6 +207,16 @@ func drainQueryLog() {
 			qlogLen++
 		}
 		qlogMu.Unlock()
+
+		// Fan out to subscribers (analytics, etc.)
+		subsMu.Lock()
+		for _, ch := range subs {
+			select {
+			case ch <- ql:
+			default: // slow subscriber — drop
+			}
+		}
+		subsMu.Unlock()
 	}
 }
 

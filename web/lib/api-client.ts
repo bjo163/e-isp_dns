@@ -99,6 +99,31 @@ export const getPresets = () => req<BlocklistPreset[]>("/api/presets");
 export const getDNSConfig    = ()              => req<DNSConfig>("/api/config");
 export const updateDNSConfig = (c: DNSConfig) => req<DNSConfig>("/api/config", { method: "PUT", body: JSON.stringify(c) });
 
+//  Analytics 
+export const getAnalyticsSummary = (period = "24h") =>
+  req<AnalyticsSummary>(`/api/analytics/summary?period=${period}`);
+export const getTopBlocked = (period = "24h", limit = 10) =>
+  req<TopEntry[]>(`/api/analytics/top-blocked?period=${period}&limit=${limit}`);
+export const getTopClients = (period = "24h", limit = 10) =>
+  req<TopEntry[]>(`/api/analytics/top-clients?period=${period}&limit=${limit}`);
+export const getHistory = (period = "24h", bucket = 3600) =>
+  req<HistoryBucket[]>(`/api/analytics/history?period=${period}&bucket=${bucket}`);
+export const getClientStats = (ip: string, period = "24h", limit = 10, bucket = 3600) =>
+  req<ClientStat>(`/api/analytics/client-stats?ip=${encodeURIComponent(ip)}&period=${period}&limit=${limit}&bucket=${bucket}`);
+
+//  Export 
+export const exportDomainsURL = (format: "csv" | "json" | "hosts" | "domains" = "domains") => {
+  const token = getToken();
+  return `${BASE}/api/domains/export?format=${format}&token=${token ?? ""}`;
+};
+
+//  Blocklist Subscriptions 
+export const getSubscriptions   = ()                                          => req<BlocklistSubscription[]>("/api/subscriptions");
+export const addSubscription    = (s: Partial<BlocklistSubscription>)          => req<BlocklistSubscription>("/api/subscriptions", { method: "POST", body: JSON.stringify(s) });
+export const updateSubscription = (id: number, s: Partial<BlocklistSubscription>) => req<BlocklistSubscription>(`/api/subscriptions/${id}`, { method: "PUT", body: JSON.stringify(s) });
+export const deleteSubscription = (id: number)                                 => req<void>(`/api/subscriptions/${id}`, { method: "DELETE" });
+export const runSubscription    = (id: number)                                 => req<{ message: string }>(`/api/subscriptions/${id}/run`, { method: "POST" });
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -180,6 +205,7 @@ export interface ACLClient {
   ip: string;
   name: string;
   action: string; // "allow" | "block"
+  blocked_categories: string; // comma-separated, e.g. "Pornografi,Judi Online"
   notes: string;
   created_at?: string;
 }
@@ -222,4 +248,45 @@ export interface ImportResult {
   parsed: number;
   inserted: number;
   skipped: number;
+}
+
+export interface AnalyticsSummary {
+  total_queries: number;
+  blocked_count: number;
+  unique_domains: number;
+  unique_clients: number;
+}
+
+export interface TopEntry {
+  name: string;
+  count: number;
+}
+
+export interface HistoryBucket {
+  ts: number;
+  total: number;
+  blocked: number;
+}
+
+export interface ClientStat {
+  total_queries: number;
+  blocked_count: number;
+  forwarded_count: number;
+  top_domains: TopEntry[];
+  top_blocked: TopEntry[];
+  history: HistoryBucket[];
+}
+
+export interface BlocklistSubscription {
+  id: number;
+  name: string;
+  url: string;
+  category: string;
+  reason: string;
+  interval_hours: number;
+  enabled: boolean;
+  last_run_at: string | null;
+  last_count: number;
+  last_error: string;
+  created_at?: string;
 }

@@ -103,14 +103,18 @@ UpdatedAt   time.Time `json:"updated_at"`
 
 // ACLClient represents a known client (subscriber) identified by IP.
 // Default action is "allow" — all clients can browse unless explicitly blocked.
+// When action="block" and BlockedCategories is non-empty, only domains matching
+// those categories are blocked (comma-separated, e.g. "Pornografi,Judi Online").
+// Empty BlockedCategories with action="block" blocks ALL DNS.
 type ACLClient struct {
-ID        uint      `gorm:"primaryKey" json:"id"`
-IP        string    `gorm:"uniqueIndex;not null" json:"ip"` // IPv4 or IPv6
-Name      string    `json:"name"`                           // human label
-Action    string    `gorm:"default:allow;not null" json:"action"` // "allow" or "block"
-Notes     string    `json:"notes"`
-CreatedAt time.Time `json:"created_at"`
-UpdatedAt time.Time `json:"updated_at"`
+ID                uint      `gorm:"primaryKey" json:"id"`
+IP                string    `gorm:"uniqueIndex;not null" json:"ip"` // IPv4 or IPv6
+Name              string    `json:"name"`                           // human label
+Action            string    `gorm:"default:allow;not null" json:"action"` // "allow" or "block"
+BlockedCategories string    `json:"blocked_categories"`            // comma-separated, e.g. "Pornografi,Judi Online"
+Notes             string    `json:"notes"`
+CreatedAt         time.Time `json:"created_at"`
+UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // BlocklistPreset is a popular public blocklist URL with metadata.
@@ -153,4 +157,33 @@ Active    bool      `gorm:"default:true;index" json:"active"`
 Notes     string    `json:"notes"`
 CreatedAt time.Time `json:"created_at"`
 UpdatedAt time.Time `json:"updated_at"`
+}
+
+// QueryLogEntry is a persistent DNS query log entry stored in SQLite.
+// Used for analytics (top-blocked, history charts).  In-memory ring buffer
+// in metrics package handles real-time WebSocket feed; this is for historical data.
+type QueryLogEntry struct {
+ID        uint      `gorm:"primaryKey" json:"id"`
+Domain    string    `gorm:"index;not null" json:"domain"`
+QType     string    `json:"qtype"`
+Action    string    `gorm:"index;not null" json:"action"` // blocked, forwarded, custom, acl_blocked
+Client    string    `gorm:"index" json:"client"`
+LatencyUs int64     `json:"latency_us"`
+CreatedAt time.Time `gorm:"index;not null" json:"created_at"`
+}
+
+// BlocklistSubscription is a scheduled blocklist import (auto-cron).
+type BlocklistSubscription struct {
+ID            uint       `gorm:"primaryKey" json:"id"`
+Name          string     `gorm:"not null" json:"name"`
+URL           string     `gorm:"not null" json:"url"`
+Category      string     `json:"category"`
+Reason        string     `json:"reason"`
+IntervalHours int        `gorm:"default:24;not null" json:"interval_hours"` // e.g. 24 = daily
+Enabled       bool       `gorm:"default:true" json:"enabled"`
+LastRunAt     *time.Time `json:"last_run_at"`
+LastCount     int64      `json:"last_count"`
+LastError     string     `json:"last_error"`
+CreatedAt     time.Time  `json:"created_at"`
+UpdatedAt     time.Time  `json:"updated_at"`
 }

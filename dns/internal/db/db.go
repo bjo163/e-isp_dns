@@ -2,6 +2,8 @@
 
 import (
 "log"
+"os"
+"path/filepath"
 
 "github.com/glebarez/sqlite"
 "github.com/truspositif/dns/internal/cache"
@@ -14,6 +16,13 @@ import (
 var DB *gorm.DB
 
 func Init(dsn string) {
+// Ensure parent directory exists (e.g. data/)
+if dir := filepath.Dir(dsn); dir != "" && dir != "." {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Fatalf("db: failed to create directory %s: %v", dir, err)
+	}
+}
+
 var err error
 DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
 Logger: logger.Default.LogMode(logger.Warn),
@@ -29,6 +38,8 @@ if err := DB.AutoMigrate(
 &models.Category{},
 &models.ACLClient{},
 &models.CustomRecord{},
+&models.QueryLogEntry{},
+&models.BlocklistSubscription{},
 ); err != nil {
 log.Fatalf("db: auto-migrate failed: %v", err)
 }

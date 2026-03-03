@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/truspositif/dns/internal/analytics"
 	"github.com/truspositif/dns/internal/api"
 	"github.com/truspositif/dns/internal/cache"
 	"github.com/truspositif/dns/internal/db"
@@ -12,6 +13,7 @@ import (
 	"github.com/truspositif/dns/internal/intercept"
 	"github.com/truspositif/dns/internal/metrics"
 	"github.com/truspositif/dns/internal/models"
+	"github.com/truspositif/dns/internal/scheduler"
 )
 
 func main() {
@@ -46,13 +48,19 @@ func main() {
 	metrics.StartSampler()
 	metrics.RunHub()
 
-	// 5. Start Fiber HTTP admin API (non-blocking)
+	// 6. Start analytics persistence (query log → SQLite) + auto-purge
+	analytics.Start(db.DB)
+
+	// 7. Start blocklist subscription scheduler (60s tick)
+	scheduler.Start(db.DB)
+
+	// 8. Start Fiber HTTP admin API (non-blocking)
 	app := api.New()
 	go func() {
 		addr := ":" + cfg.HTTPPort
 		log.Printf("api: Fiber listening on %s", addr)
 		if err := app.Listen(addr); err != nil {
-			log.Fatalf("api: %v", err)
+			log.Fatalf("api: failed to listen on %s (port in use?): %v", addr, err)
 		}
 	}()
 
@@ -62,6 +70,7 @@ func main() {
 	go intSrv.Start()
 
 	// 7. Start DNS server (blocks)
+	log.Printf("dns: starting on %s (upstream %s, redirect %s)", cfg.ListenAddr, cfg.UpstreamDNS, cfg.RedirectIP)
 	srv := dns.New(cfg.ListenAddr, cfg.UpstreamDNS, cfg.RedirectIP)
 	srv.Start()
 }

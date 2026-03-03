@@ -44,8 +44,8 @@ var (
 	metaCache   map[string][2]string // domain → [reason, category]
 	metaCacheMu sync.RWMutex
 
-	// ACL cache: client IP → action ("allow" / "block")
-	aclCache   map[string]string
+	// ACL cache: client IP → structured ACL entry
+	aclCache   map[string]ACLEntry
 	aclMu      sync.RWMutex
 	aclDefault = true // true = allow all by default
 
@@ -67,11 +67,17 @@ type RecordVal struct {
 	Priority uint16
 }
 
+// ACLEntry holds the action and optional blocked categories for a client.
+type ACLEntry struct {
+	Action            string
+	BlockedCategories []string // empty = block ALL when action="block"
+}
+
 // Init connects to Redis and warms the L1 cache from the DB.
 // redisURL may be empty — in that case only L1 (in-process) is used.
 func Init(redisURL string, dbConn *gorm.DB) {
 	metaCache = make(map[string][2]string)
-	aclCache = make(map[string]string)
+	aclCache = make(map[string]ACLEntry)
 	recCache = make(map[recordKey][]RecordVal)
 
 	if redisURL != "" {
@@ -230,15 +236,24 @@ func SetACLDefault(allow bool) {
 // ReloadACL rebuilds the ACL cache from the database.
 func ReloadACL(dbConn *gorm.DB) {
 	type row struct {
-		IP     string
-		Action string
+		IP                string
+		Action            string
+		BlockedCategories string
 	}
 	var rows []row
-	dbConn.Raw("SELECT ip, action FROM acl_clients").Scan(&rows)
+	dbConn.Raw("SELECT ip, action, blocked_categories FROM acl_clients").Scan(&rows)
 
-	newACL := make(map[string]string, len(rows))
+	newACL := make(map[string]ACLEntry, len(rows))
 	for _, r := range rows {
-		newACL[r.IP] = r.Action
+		var cats []string
+		if r.BlockedCategories != "" {
+			for _, c := range strings.Split(r.BlockedCategories, ",") {
+				if t := strings.TrimSpace(c); t != "" {
+					cats = append(cats, t)
+				}
+			}
+		}
+		newACL[r.IP] = ACLEntry{Action: r.Action, BlockedCategories: cats}
 	}
 	aclMu.Lock()
 	aclCache = newACL
@@ -246,19 +261,20 @@ func ReloadACL(dbConn *gorm.DB) {
 	log.Printf("cache: loaded %d ACL entries", len(rows))
 }
 
-// IsClientAllowed checks if a client IP is allowed to browse (bypass blocking).
-// Default-allow mode: unknown IPs are allowed; only explicit "block" entries block.
-// Default-block mode: unknown IPs are blocked; only explicit "allow" entries pass.
-func IsClientAllowed(clientIP string) bool {
+// GetClientACL returns the ACL entry for a client IP and whether it was found.
+func GetClientACL(clientIP string) (ACLEntry, bool) {
 	aclMu.RLock()
-	action, found := aclCache[clientIP]
+	entry, found := aclCache[clientIP]
+	aclMu.RUnlock()
+	return entry, found
+}
+
+// GetACLDefault returns the default ACL policy.
+func GetACLDefault() bool {
+	aclMu.RLock()
 	def := aclDefault
 	aclMu.RUnlock()
-
-	if !found {
-		return def // default policy
-	}
-	return action == "allow"
+	return def
 }
 
 // ── Custom DNS Records Cache ─────────────────────────────────────────────────

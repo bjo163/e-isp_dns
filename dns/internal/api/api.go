@@ -1,24 +1,25 @@
 ﻿package api
 
 import (
-	"bufio"
+	"encoding/csv"
 	"fmt"
-	"io"
-	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/websocket/v2"
+	"github.com/truspositif/dns/internal/analytics"
 	"github.com/truspositif/dns/internal/auth"
 	"github.com/truspositif/dns/internal/cache"
 	"github.com/truspositif/dns/internal/db"
+	"github.com/truspositif/dns/internal/importer"
 	"github.com/truspositif/dns/internal/metrics"
 	"github.com/truspositif/dns/internal/models"
+	"github.com/truspositif/dns/internal/scheduler"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm/clause"
 )
 
 func New() *fiber.App {
@@ -132,6 +133,23 @@ func New() *fiber.App {
 	// DNS Config
 	v1.Get("/config", getDNSConfig)
 	v1.Put("/config", updateDNSConfig)
+
+	// Analytics
+	v1.Get("/analytics/summary", handleAnalyticsSummary)
+	v1.Get("/analytics/top-blocked", handleTopBlocked)
+	v1.Get("/analytics/top-clients", handleTopClients)
+	v1.Get("/analytics/history", handleHistory)
+	v1.Get("/analytics/client-stats", handleClientStats)
+
+	// Export
+	v1.Get("/domains/export", exportDomains)
+
+	// Blocklist Subscriptions
+	v1.Get("/subscriptions", listSubscriptions)
+	v1.Post("/subscriptions", addSubscription)
+	v1.Put("/subscriptions/:id", updateSubscription)
+	v1.Delete("/subscriptions/:id", deleteSubscription)
+	v1.Post("/subscriptions/:id/run", runSubscription)
 
 	return app
 }
@@ -321,57 +339,14 @@ func importDomains(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "url required"})
 	}
 
-	resp, err := http.Get(req.URL)
+	result, err := importer.FromURL(db.DB, req.URL, req.Category, req.Reason)
 	if err != nil {
-		return c.Status(502).JSON(fiber.Map{"error": fmt.Sprintf("gagal mengunduh: %v", err)})
+		return c.Status(502).JSON(fiber.Map{"error": err.Error()})
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
-	if err != nil {
-		return c.Status(502).JSON(fiber.Map{"error": "gagal membaca response"})
-	}
-
-	var entries []models.BlockedDomain
-	seen := map[string]bool{}
-
-	scanner := bufio.NewScanner(strings.NewReader(string(body)))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
-			continue
-		}
-		var domain string
-		if strings.HasPrefix(line, "0.0.0.0") || strings.HasPrefix(line, "127.0.0.1") {
-			if parts := strings.Fields(line); len(parts) >= 2 {
-				domain = strings.ToLower(parts[1])
-			}
-		} else if strings.HasPrefix(line, "||") && strings.HasSuffix(line, "^") {
-			domain = strings.ToLower(line[2 : len(line)-1])
-		} else if !strings.Contains(line, " ") && strings.Contains(line, ".") {
-			domain = strings.ToLower(line)
-		}
-		domain = strings.TrimPrefix(domain, "www.")
-		if domain == "" || strings.Contains(domain, "/") || seen[domain] || domain == "localhost" {
-			continue
-		}
-		seen[domain] = true
-		entries = append(entries, models.BlockedDomain{
-			Domain: domain, Category: req.Category, Reason: req.Reason, Active: true,
-		})
-	}
-
-	if len(entries) == 0 {
-		return c.Status(400).JSON(fiber.Map{"error": "tidak ada domain valid ditemukan"})
-	}
-
-	result := db.DB.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(entries, 500)
-	inserted := result.RowsAffected
-	go cache.Reload(db.DB)
 	return c.JSON(fiber.Map{
-		"parsed":   len(entries),
-		"inserted": inserted,
-		"skipped":  int64(len(entries)) - inserted,
+		"parsed":   result.Parsed,
+		"inserted": result.Inserted,
+		"skipped":  result.Skipped,
 	})
 }
 
@@ -637,4 +612,168 @@ func updateDNSConfig(c *fiber.Ctx) error {
 	// Update ACL default policy from config
 	cache.SetACLDefault(cfg.ACLDefaultAllow)
 	return c.JSON(cfg)
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  ANALYTICS
+// ═════════════════════════════════════════════════════════════════════════════
+
+// parsePeriod converts a period query param (1h/24h/7d/30d) to a time.Time.
+func parsePeriod(c *fiber.Ctx) time.Time {
+	switch c.Query("period", "24h") {
+	case "1h":
+		return time.Now().Add(-1 * time.Hour)
+	case "7d":
+		return time.Now().Add(-7 * 24 * time.Hour)
+	case "30d":
+		return time.Now().Add(-30 * 24 * time.Hour)
+	default: // "24h"
+		return time.Now().Add(-24 * time.Hour)
+	}
+}
+
+func handleAnalyticsSummary(c *fiber.Ctx) error {
+	return c.JSON(analytics.GetSummary(parsePeriod(c)))
+}
+
+func handleTopBlocked(c *fiber.Ctx) error {
+	limit, _ := strconv.Atoi(c.Query("limit", "10"))
+	if limit < 1 || limit > 100 {
+		limit = 10
+	}
+	return c.JSON(analytics.TopBlocked(limit, parsePeriod(c)))
+}
+
+func handleTopClients(c *fiber.Ctx) error {
+	limit, _ := strconv.Atoi(c.Query("limit", "10"))
+	if limit < 1 || limit > 100 {
+		limit = 10
+	}
+	return c.JSON(analytics.TopClients(limit, parsePeriod(c)))
+}
+
+func handleHistory(c *fiber.Ctx) error {
+	bucketSec, _ := strconv.ParseInt(c.Query("bucket", "3600"), 10, 64)
+	if bucketSec < 60 {
+		bucketSec = 60
+	}
+	return c.JSON(analytics.History(parsePeriod(c), bucketSec))
+}
+
+func handleClientStats(c *fiber.Ctx) error {
+	ip := c.Query("ip")
+	if ip == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "ip required"})
+	}
+	limit, _ := strconv.Atoi(c.Query("limit", "10"))
+	if limit < 1 || limit > 100 {
+		limit = 10
+	}
+	bucketSec, _ := strconv.ParseInt(c.Query("bucket", "3600"), 10, 64)
+	if bucketSec < 60 {
+		bucketSec = 60
+	}
+	return c.JSON(analytics.ClientStats(ip, limit, parsePeriod(c), bucketSec))
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  EXPORT
+// ═════════════════════════════════════════════════════════════════════════════
+
+func exportDomains(c *fiber.Ctx) error {
+	var domains []models.BlockedDomain
+	db.DB.Where("active = ?", true).Order("domain asc").Find(&domains)
+
+	format := c.Query("format", "domains")
+	switch format {
+	case "csv":
+		c.Set("Content-Type", "text/csv")
+		c.Set("Content-Disposition", "attachment; filename=blocklist.csv")
+		w := csv.NewWriter(c.Response().BodyWriter())
+		_ = w.Write([]string{"domain", "category", "reason"})
+		for _, d := range domains {
+			_ = w.Write([]string{d.Domain, d.Category, d.Reason})
+		}
+		w.Flush()
+		return nil
+	case "json":
+		return c.JSON(domains)
+	case "hosts":
+		c.Set("Content-Type", "text/plain")
+		c.Set("Content-Disposition", "attachment; filename=blocklist-hosts.txt")
+		var sb strings.Builder
+		sb.WriteString("# TrustPositif blocklist (hosts format)\n")
+		for _, d := range domains {
+			fmt.Fprintf(&sb, "0.0.0.0 %s\n", d.Domain)
+		}
+		return c.SendString(sb.String())
+	default: // "domains"
+		c.Set("Content-Type", "text/plain")
+		c.Set("Content-Disposition", "attachment; filename=blocklist.txt")
+		var sb strings.Builder
+		sb.WriteString("# TrustPositif blocklist (domain list)\n")
+		for _, d := range domains {
+			sb.WriteString(d.Domain)
+			sb.WriteByte('\n')
+		}
+		return c.SendString(sb.String())
+	}
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  BLOCKLIST SUBSCRIPTIONS
+// ═════════════════════════════════════════════════════════════════════════════
+
+func listSubscriptions(c *fiber.Ctx) error {
+	var subs []models.BlocklistSubscription
+	db.DB.Order("created_at desc").Find(&subs)
+	return c.JSON(subs)
+}
+
+func addSubscription(c *fiber.Ctx) error {
+	var s models.BlocklistSubscription
+	if err := c.BodyParser(&s); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+	if s.Name == "" || s.URL == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "name and url required"})
+	}
+	if s.IntervalHours < 1 {
+		s.IntervalHours = 24
+	}
+	if err := db.DB.Create(&s).Error; err != nil {
+		return c.Status(409).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(201).JSON(s)
+}
+
+func updateSubscription(c *fiber.Ctx) error {
+	id := c.Params("id")
+	var s models.BlocklistSubscription
+	if err := db.DB.First(&s, id).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "not found"})
+	}
+	if err := c.BodyParser(&s); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+	db.DB.Save(&s)
+	return c.JSON(s)
+}
+
+func deleteSubscription(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if err := db.DB.Delete(&models.BlocklistSubscription{}, id).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.SendStatus(204)
+}
+
+func runSubscription(c *fiber.Ctx) error {
+	idStr := c.Params("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid id"})
+	}
+	go scheduler.RunSubscription(uint(id))
+	return c.JSON(fiber.Map{"message": "subscription run started"})
 }

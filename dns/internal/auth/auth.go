@@ -53,15 +53,22 @@ return claims, nil
 
 func Middleware() fiber.Handler {
 return func(c *fiber.Ctx) error {
-header := c.Get("Authorization")
-if header == "" {
-return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing Authorization header"})
-}
+// Try Authorization header first
+tokenStr := ""
+if header := c.Get("Authorization"); header != "" {
 parts := strings.SplitN(header, " ", 2)
-if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid Authorization format"})
+if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+tokenStr = parts[1]
 }
-claims, err := Verify(parts[1])
+}
+// Fallback: ?token= query param (for direct downloads like export)
+if tokenStr == "" {
+tokenStr = c.Query("token")
+}
+if tokenStr == "" {
+return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing auth token"})
+}
+claims, err := Verify(tokenStr)
 if err != nil {
 return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
 }

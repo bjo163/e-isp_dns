@@ -97,49 +97,49 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 			return
 		}
 
-		// ── 3. ACL check: if client is explicitly allowed → skip blocking
-		if cache.IsClientAllowed(clientIP) {
-			// Client allowed — check if domain is blocked anyway
-			if s.isBlocked(domain) {
-				// Allowed client bypasses blocking
+		// ── 3. ACL check — category-aware blocking
+		acl, aclFound := cache.GetClientACL(clientIP)
+		if aclFound {
+			if acl.Action == "allow" {
+				// Explicitly allowed client — bypass all blocking, forward upstream
 				metrics.IncForwarded()
 				s.proxyAndRecord(w, r, start, domain, qtype, clientIP)
 				return
 			}
-		} else {
-			// Client is blocked by ACL — block ALL their DNS
-			metrics.IncBlocked()
-			rr := &dns.A{
-				Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
-				A:   net.ParseIP(s.redirectIP).To4(),
+			// action == "block"
+			if len(acl.BlockedCategories) == 0 {
+				// No categories → block ALL DNS
+				metrics.IncBlocked()
+				s.respondBlocked(w, msg, q.Name, start, domain, qtype, clientIP, "acl_blocked")
+				return
 			}
-			msg.Answer = append(msg.Answer, rr)
-			latUs := time.Since(start).Microseconds()
-			metrics.RecordLatency(latUs)
-			w.WriteMsg(msg)
-			metrics.LogQuery(metrics.QueryLog{
-				Ts: time.Now().UnixMilli(), Domain: domain, QType: qtype,
-				Action: "acl_blocked", LatencyUs: latUs, Client: clientIP,
-			})
+			// Has categories → only block matching domains
+			if s.isBlocked(domain) {
+				_, cat := cache.Lookup(domain)
+				if s.categoryMatch(cat, acl.BlockedCategories) {
+					metrics.IncBlocked()
+					s.respondBlocked(w, msg, q.Name, start, domain, qtype, clientIP, "blocked")
+					return
+				}
+			}
+			// Domain not in blocked list or category not matched → forward
+			metrics.IncForwarded()
+			s.proxyAndRecord(w, r, start, domain, qtype, clientIP)
 			return
 		}
 
-		// ── 4. Domain blocklist check
+		// No ACL entry — apply default policy
+		if !cache.GetACLDefault() {
+			// Default-deny — block all unknown clients
+			metrics.IncBlocked()
+			s.respondBlocked(w, msg, q.Name, start, domain, qtype, clientIP, "acl_blocked")
+			return
+		}
+
+		// ── 4. Domain blocklist check (default-allow + no ACL entry)
 		if s.isBlocked(domain) {
 			metrics.IncBlocked()
-			log.Printf("dns: BLOCKED %s → %s", domain, s.redirectIP)
-			rr := &dns.A{
-				Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
-				A:   net.ParseIP(s.redirectIP).To4(),
-			}
-			msg.Answer = append(msg.Answer, rr)
-			latUs := time.Since(start).Microseconds()
-			metrics.RecordLatency(latUs)
-			w.WriteMsg(msg)
-			metrics.LogQuery(metrics.QueryLog{
-				Ts: time.Now().UnixMilli(), Domain: domain, QType: qtype,
-				Action: "blocked", LatencyUs: latUs, Client: clientIP,
-			})
+			s.respondBlocked(w, msg, q.Name, start, domain, qtype, clientIP, "blocked")
 			return
 		}
 	}
@@ -166,6 +166,35 @@ func (s *Server) proxyAndRecord(w dns.ResponseWriter, r *dns.Msg, start time.Tim
 		Ts: time.Now().UnixMilli(), Domain: domain, QType: qtype,
 		Action: "forwarded", LatencyUs: latUs, Client: clientIP,
 	})
+}
+
+// respondBlocked sends a redirect A record and logs the action.
+func (s *Server) respondBlocked(w dns.ResponseWriter, msg *dns.Msg, qname string, start time.Time, domain, qtype, clientIP, action string) {
+	rr := &dns.A{
+		Hdr: dns.RR_Header{Name: qname, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+		A:   net.ParseIP(s.redirectIP).To4(),
+	}
+	msg.Answer = append(msg.Answer, rr)
+	latUs := time.Since(start).Microseconds()
+	metrics.RecordLatency(latUs)
+	w.WriteMsg(msg)
+	metrics.LogQuery(metrics.QueryLog{
+		Ts: time.Now().UnixMilli(), Domain: domain, QType: qtype,
+		Action: action, LatencyUs: latUs, Client: clientIP,
+	})
+}
+
+// categoryMatch checks if cat appears in the allowed categories list.
+func (s *Server) categoryMatch(cat string, categories []string) bool {
+	if cat == "" {
+		return false
+	}
+	for _, c := range categories {
+		if strings.EqualFold(c, cat) {
+			return true
+		}
+	}
+	return false
 }
 
 // isBlocked checks the two-layer cache (L1 sync.Map → L2 Redis).
