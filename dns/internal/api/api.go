@@ -169,6 +169,11 @@ func New() *fiber.App {
 	v1.Delete("/subscriptions/:id", deleteSubscription)
 	v1.Post("/subscriptions/:id/run", runSubscription)
 
+	// Whitelist (safe domains that bypass blocking)
+	v1.Get("/whitelist", listWhitelist)
+	v1.Post("/whitelist", addWhitelist)
+	v1.Delete("/whitelist/:id", deleteWhitelist)
+
 	return app
 }
 
@@ -197,7 +202,7 @@ func handleLogin(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "gagal membuat token"})
 	}
-	return c.JSON(fiber.Map{"token": token, "username": user.Username})
+	return c.JSON(fiber.Map{"token": token, "username": user.Username, "must_change_password": user.MustChangePassword})
 }
 
 type changePasswordRequest struct {
@@ -225,7 +230,7 @@ func handleChangePassword(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "gagal memproses password"})
 	}
-	if err := db.DB.Model(&user).Update("password_hash", string(hash)).Error; err != nil {
+	if err := db.DB.Model(&user).Updates(map[string]interface{}{"password_hash": string(hash), "must_change_password": false}).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(fiber.Map{"message": "password berhasil diubah"})
@@ -821,4 +826,45 @@ func runSubscription(c *fiber.Ctx) error {
 	}
 	go scheduler.RunSubscription(uint(id))
 	return c.JSON(fiber.Map{"message": "subscription run started"})
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  WHITELIST (safe domains that always pass through)
+// ═════════════════════════════════════════════════════════════════════════════
+
+func listWhitelist(c *fiber.Ctx) error {
+	var items []models.WhitelistedDomain
+	db.DB.Order("domain asc").Find(&items)
+	return c.JSON(items)
+}
+
+func addWhitelist(c *fiber.Ctx) error {
+	var item models.WhitelistedDomain
+	if err := c.BodyParser(&item); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
+	}
+	item.Domain = strings.ToLower(strings.TrimSpace(item.Domain))
+	if item.Domain == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "domain wajib diisi"})
+	}
+	if err := db.DB.Create(&item).Error; err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			return c.Status(409).JSON(fiber.Map{"error": "domain sudah ada di whitelist"})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	cache.ReloadWhitelist(db.DB)
+	return c.Status(201).JSON(item)
+}
+
+func deleteWhitelist(c *fiber.Ctx) error {
+	id, err := strconv.ParseUint(c.Params("id"), 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid id"})
+	}
+	if err := db.DB.Delete(&models.WhitelistedDomain{}, id).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	cache.ReloadWhitelist(db.DB)
+	return c.SendStatus(204)
 }

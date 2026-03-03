@@ -8,7 +8,7 @@ import {
   Save, RefreshCw, AlertTriangle, CheckCircle2, XCircle, Eye, EyeOff,
   ChevronRight, ChevronLeft, Server, LogOut, KeyRound, Download,
   Users, Tags, FileText, Search, BarChart3, CalendarClock, Activity,
-  Database, Lock, ListFilter, Layers, Network,
+  Database, Lock, ListFilter, Layers, Network, ShieldCheck,
 } from "lucide-react";
 import {
   getBranding, updateBranding, getDomains, addDomain, deleteDomain,
@@ -18,9 +18,10 @@ import {
   getClients, getDetectedClients, addClient, updateClient, deleteClient,
   getRecords, addRecord, updateRecord, deleteRecord,
   getPresets, getClientStats,
+  getWhitelist, addWhitelist, deleteWhitelist,
   type Branding, type BlockedDomain, type DNSConfig, type NewDomain, type ImportResult,
   type Category, type ACLClient, type DetectedClient,
-  type CustomRecord, type BlocklistPreset, type ClientStat,
+  type CustomRecord, type BlocklistPreset, type ClientStat, type WhitelistedDomain,
 } from "@/lib/api-client";
 import { LiveMetrics } from "@/components/sections/LiveMetrics";
 import { BlocklistsTab } from "@/components/tabs/BlocklistsTab";
@@ -35,7 +36,7 @@ type Toast = { id: number; msg: string; type: "ok" | "err" };
 let _tid = 0;
 
 //  Tabs (refactored)
-type Tab = "overview" | "blocklists" | "querylog" | "blockpage" | "domains" | "records" | "subscriptions" | "categories" | "clients" | "dns" | "security";
+type Tab = "overview" | "blocklists" | "querylog" | "blockpage" | "domains" | "records" | "subscriptions" | "categories" | "clients" | "dns" | "security" | "whitelist";
 
 type TabItem = { id: Tab; label: string; icon: React.ReactNode };
 type TabGroup = { section: string; items: TabItem[] };
@@ -55,6 +56,7 @@ const TAB_GROUPS: TabGroup[] = [
       { id: "categories", label: "Kategori", icon: <Tags className="w-3.5 h-3.5" /> },
       { id: "subscriptions", label: "Subscriptions", icon: <CalendarClock className="w-3.5 h-3.5" /> },
       { id: "blocklists", label: "Blocklists", icon: <ListFilter className="w-3.5 h-3.5" /> },
+      { id: "whitelist", label: "Whitelist", icon: <ShieldCheck className="w-3.5 h-3.5" /> },
     ],
   },
   {
@@ -215,6 +217,10 @@ export default function AdminPage() {
   // Presets
   const [presets, setPresets] = useState<BlocklistPreset[]>([]);
 
+  // Whitelist (safe domains)
+  const [whitelist, setWhitelist] = useState<WhitelistedDomain[]>([]);
+  const [newWL, setNewWL] = useState({ domain: "", reason: "" });
+
   // Loading states
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -286,6 +292,7 @@ export default function AdminPage() {
       getDetectedClients().then(setDetected).catch(() => { });
       loadRecords(1, "", "");
       getPresets().then(setPresets).catch(() => { });
+      getWhitelist().then(setWhitelist).catch(() => { });
     } catch {
       setConnected(false);
     } finally {
@@ -584,6 +591,69 @@ export default function AdminPage() {
 
               {/* BLOCKLISTS */}
               {tab === "blocklists" && <BlocklistsTab />}
+
+              {/* WHITELIST */}
+              {tab === "whitelist" && (
+                <div className="max-w-4xl space-y-6">
+                  <SectionTitle title="Whitelist" sub="Domain yang tidak akan pernah diblokir — bahkan jika ada di blocklist" />
+
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!newWL.domain.trim()) return;
+                    try {
+                      const item = await addWhitelist(newWL);
+                      setWhitelist(prev => [...prev, item]);
+                      setNewWL({ domain: "", reason: "" });
+                      toast("Domain ditambahkan ke whitelist");
+                    } catch (err: unknown) { toast((err as Error).message, "err"); }
+                  }} className="border rounded p-5 space-y-4" style={{ borderColor: "var(--brand-border)" }}>
+                    <CardHeader label="Tambah Domain ke Whitelist" />
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <input type="text" placeholder="contoh.com" value={newWL.domain}
+                        onChange={e => setNewWL(d => ({ ...d, domain: e.target.value }))} required
+                        className="px-3 py-2 text-sm border rounded bg-transparent outline-none font-mono"
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                      <input type="text" placeholder="Alasan (opsional)" value={newWL.reason}
+                        onChange={e => setNewWL(d => ({ ...d, reason: e.target.value }))}
+                        className="px-3 py-2 text-sm border rounded bg-transparent outline-none"
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                      <button type="submit"
+                        className="flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold tracking-widest uppercase border transition-all"
+                        style={{ color: "#4ade80", borderColor: "#4ade80", background: "rgba(74,222,128,0.06)" }}>
+                        <Plus className="w-3.5 h-3.5" /> Tambah
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="border rounded p-5 space-y-3" style={{ borderColor: "var(--brand-border)" }}>
+                    <CardHeader label={`Daftar Whitelist (${whitelist.length})`} />
+                    {whitelist.length === 0 && (
+                      <p className="text-xs py-4 text-center" style={{ color: "var(--brand-muted)" }}>
+                        Belum ada domain di whitelist.
+                      </p>
+                    )}
+                    {whitelist.map(item => (
+                      <div key={item.id} className="flex items-center justify-between py-2 px-3 border rounded"
+                        style={{ borderColor: "var(--brand-border)" }}>
+                        <div>
+                          <span className="text-sm font-mono font-medium">{item.domain}</span>
+                          {item.reason && <span className="ml-3 text-xs" style={{ color: "var(--brand-muted)" }}>{item.reason}</span>}
+                        </div>
+                        <button onClick={async () => {
+                          if (!window.confirm(`Hapus "${item.domain}" dari whitelist?`)) return;
+                          try {
+                            await deleteWhitelist(item.id);
+                            setWhitelist(prev => prev.filter(x => x.id !== item.id));
+                            toast(`${item.domain} dihapus dari whitelist`);
+                          } catch (err: unknown) { toast((err as Error).message, "err"); }
+                        }} className="hover:text-red-400 transition-colors" style={{ color: "var(--brand-muted)" }}>
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* ACCESS CONTROL — merged into clients tab, removed standalone */}
 

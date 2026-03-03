@@ -52,6 +52,10 @@ var (
 	// Custom DNS records cache
 	recCache map[recordKey][]RecordVal
 	recMu    sync.RWMutex
+
+	// Whitelist cache: domains that must never be blocked
+	wlCache map[string]struct{}
+	wlMu    sync.RWMutex
 )
 
 // recordKey is domain+type for custom record lookup.
@@ -98,6 +102,7 @@ func Init(redisURL string, dbConn *gorm.DB) {
 	}
 
 	Reload(dbConn)
+	ReloadWhitelist(dbConn)
 	ReloadACL(dbConn)
 	ReloadRecords(dbConn)
 }
@@ -163,6 +168,30 @@ func Reload(dbConn *gorm.DB) {
 
 	metrics.SetBlockedDomains(uint64(len(rows)))
 	log.Printf("cache: loaded %d active domains", len(rows))
+}
+
+// ReloadWhitelist rebuilds the whitelist cache from DB.
+func ReloadWhitelist(dbConn *gorm.DB) {
+	type row struct{ Domain string }
+	var rows []row
+	dbConn.Raw("SELECT domain FROM whitelisted_domains").Scan(&rows)
+	newWL := make(map[string]struct{}, len(rows))
+	for _, r := range rows {
+		newWL[strings.ToLower(r.Domain)] = struct{}{}
+	}
+	wlMu.Lock()
+	wlCache = newWL
+	wlMu.Unlock()
+	log.Printf("cache: loaded %d whitelisted domains", len(rows))
+}
+
+// IsWhitelisted returns true if the domain is in the whitelist.
+func IsWhitelisted(domain string) bool {
+	d := strings.ToLower(domain)
+	wlMu.RLock()
+	_, ok := wlCache[d]
+	wlMu.RUnlock()
+	return ok
 }
 
 // IsBlocked returns true if the domain (or any parent suffix) is in the blocklist.

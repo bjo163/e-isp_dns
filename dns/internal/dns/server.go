@@ -98,7 +98,14 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		}
 		qtypeN := q.Qtype // capture for respondBlocked
 
-		// ── 3. ACL check — category-aware blocking
+		// ── 3. Whitelist check — whitelisted domains always pass through
+		if cache.IsWhitelisted(domain) {
+			metrics.IncForwarded()
+			s.proxyAndRecord(w, r, start, domain, qtype, clientIP)
+			return
+		}
+
+		// ── 4. ACL check — category-aware blocking
 		acl, aclFound := cache.GetClientACL(clientIP)
 		if aclFound {
 			if acl.Action == "allow" {
@@ -137,7 +144,7 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 			return
 		}
 
-		// ── 4. Domain blocklist check (default-allow + no ACL entry)
+		// ── 5. Domain blocklist check (default-allow + no ACL entry)
 		if s.isBlocked(domain) {
 			metrics.IncBlocked()
 			s.respondBlocked(w, msg, q.Name, qtypeN, start, domain, qtype, clientIP, "blocked")

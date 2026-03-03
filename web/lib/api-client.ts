@@ -51,8 +51,8 @@ export const getIPReputation = (ip: string) => req<IPReputationEntry[]>(`/api/re
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 //  Token helpers (browser only) 
-export const getToken  = () => (typeof window !== "undefined" ? localStorage.getItem("admin_token") : null);
-export const setToken  = (t: string) => localStorage.setItem("admin_token", t);
+export const getToken = () => (typeof window !== "undefined" ? localStorage.getItem("admin_token") : null);
+export const setToken = (t: string) => localStorage.setItem("admin_token", t);
 export const clearToken = () => localStorage.removeItem("admin_token");
 
 //  Base fetch wrapper 
@@ -92,7 +92,7 @@ export const changePassword = (current_password: string, new_password: string) =
   });
 
 //  Branding 
-export const getBranding    = ()             => req<Branding>("/api/branding");
+export const getBranding = () => req<Branding>("/api/branding");
 export const updateBranding = (b: Branding) => req<Branding>("/api/branding", { method: "PUT", body: JSON.stringify(b) });
 
 //  Blocked Domains (paginated) 
@@ -105,9 +105,9 @@ export const getDomains = (params?: { page?: number; limit?: number; search?: st
   if (params?.active) p.set("active", params.active);
   return req<PaginatedResponse<BlockedDomain>>(`/api/domains?${p.toString()}`);
 };
-export const addDomain    = (d: NewDomain)                              => req<BlockedDomain>("/api/domains", { method: "POST", body: JSON.stringify(d) });
-export const updateDomain = (id: number, d: Partial<BlockedDomain>)    => req<BlockedDomain>(`/api/domains/${id}`, { method: "PUT", body: JSON.stringify(d) });
-export const deleteDomain = (id: number)                                => req<void>(`/api/domains/${id}`, { method: "DELETE" });
+export const addDomain = (d: NewDomain) => req<BlockedDomain>("/api/domains", { method: "POST", body: JSON.stringify(d) });
+export const updateDomain = (id: number, d: Partial<BlockedDomain>) => req<BlockedDomain>(`/api/domains/${id}`, { method: "PUT", body: JSON.stringify(d) });
+export const deleteDomain = (id: number) => req<void>(`/api/domains/${id}`, { method: "DELETE" });
 export const bulkDeleteDomains = (ids: number[]) => req<{ deleted: number }>("/api/domains/bulk", { method: "DELETE", body: JSON.stringify({ ids }) });
 
 export const importDomains = (url: string, category: string, reason: string) =>
@@ -117,17 +117,17 @@ export const importDomains = (url: string, category: string, reason: string) =>
   });
 
 //  Categories 
-export const getCategories   = ()                                 => req<Category[]>("/api/categories");
-export const addCategory     = (c: Partial<Category>)             => req<Category>("/api/categories", { method: "POST", body: JSON.stringify(c) });
-export const updateCategory  = (id: number, c: Partial<Category>) => req<Category>(`/api/categories/${id}`, { method: "PUT", body: JSON.stringify(c) });
-export const deleteCategory  = (id: number)                        => req<void>(`/api/categories/${id}`, { method: "DELETE" });
+export const getCategories = () => req<Category[]>("/api/categories");
+export const addCategory = (c: Partial<Category>) => req<Category>("/api/categories", { method: "POST", body: JSON.stringify(c) });
+export const updateCategory = (id: number, c: Partial<Category>) => req<Category>(`/api/categories/${id}`, { method: "PUT", body: JSON.stringify(c) });
+export const deleteCategory = (id: number) => req<void>(`/api/categories/${id}`, { method: "DELETE" });
 
 //  ACL Clients 
-export const getClients       = ()                                    => req<ACLClient[]>("/api/clients");
-export const getDetectedClients = ()                                  => req<DetectedClient[]>("/api/clients/detected");
-export const addClient        = (c: Partial<ACLClient>)               => req<ACLClient>("/api/clients", { method: "POST", body: JSON.stringify(c) });
-export const updateClient     = (id: number, c: Partial<ACLClient>)   => req<ACLClient>(`/api/clients/${id}`, { method: "PUT", body: JSON.stringify(c) });
-export const deleteClient     = (id: number)                           => req<void>(`/api/clients/${id}`, { method: "DELETE" });
+export const getClients = () => req<ACLClient[]>("/api/clients");
+export const getDetectedClients = () => req<DetectedClient[]>("/api/clients/detected");
+export const addClient = (c: Partial<ACLClient>) => req<ACLClient>("/api/clients", { method: "POST", body: JSON.stringify(c) });
+export const updateClient = (id: number, c: Partial<ACLClient>) => req<ACLClient>(`/api/clients/${id}`, { method: "PUT", body: JSON.stringify(c) });
+export const deleteClient = (id: number) => req<void>(`/api/clients/${id}`, { method: "DELETE" });
 
 //  Custom DNS Records (paginated) 
 export const getRecords = (params?: { page?: number; limit?: number; search?: string; type?: string }) => {
@@ -138,15 +138,15 @@ export const getRecords = (params?: { page?: number; limit?: number; search?: st
   if (params?.type) p.set("type", params.type);
   return req<PaginatedResponse<CustomRecord>>(`/api/records?${p.toString()}`);
 };
-export const addRecord    = (r: Partial<CustomRecord>)              => req<CustomRecord>("/api/records", { method: "POST", body: JSON.stringify(r) });
+export const addRecord = (r: Partial<CustomRecord>) => req<CustomRecord>("/api/records", { method: "POST", body: JSON.stringify(r) });
 export const updateRecord = (id: number, r: Partial<CustomRecord>) => req<CustomRecord>(`/api/records/${id}`, { method: "PUT", body: JSON.stringify(r) });
-export const deleteRecord = (id: number)                            => req<void>(`/api/records/${id}`, { method: "DELETE" });
+export const deleteRecord = (id: number) => req<void>(`/api/records/${id}`, { method: "DELETE" });
 
 //  Blocklist Presets 
 export const getPresets = () => req<BlocklistPreset[]>("/api/presets");
 
 //  DNS Config 
-export const getDNSConfig    = ()              => req<DNSConfig>("/api/config");
+export const getDNSConfig = () => req<DNSConfig>("/api/config");
 export const updateDNSConfig = (c: DNSConfig) => req<DNSConfig>("/api/config", { method: "PUT", body: JSON.stringify(c) });
 
 //  Analytics 
@@ -168,11 +168,17 @@ export const exportDomainsURL = (format: "csv" | "json" | "hosts" | "domains" = 
 };
 
 //  Blocklist Subscriptions 
-export const getSubscriptions   = ()                                          => req<BlocklistSubscription[]>("/api/subscriptions");
-export const addSubscription    = (s: Partial<BlocklistSubscription>)          => req<BlocklistSubscription>("/api/subscriptions", { method: "POST", body: JSON.stringify(s) });
+export const getSubscriptions = () => req<BlocklistSubscription[]>("/api/subscriptions");
+export const addSubscription = (s: Partial<BlocklistSubscription>) => req<BlocklistSubscription>("/api/subscriptions", { method: "POST", body: JSON.stringify(s) });
 export const updateSubscription = (id: number, s: Partial<BlocklistSubscription>) => req<BlocklistSubscription>(`/api/subscriptions/${id}`, { method: "PUT", body: JSON.stringify(s) });
-export const deleteSubscription = (id: number)                                 => req<void>(`/api/subscriptions/${id}`, { method: "DELETE" });
-export const runSubscription    = (id: number)                                 => req<{ message: string }>(`/api/subscriptions/${id}/run`, { method: "POST" });
+export const deleteSubscription = (id: number) => req<void>(`/api/subscriptions/${id}`, { method: "DELETE" });
+export const runSubscription = (id: number) => req<{ message: string }>(`/api/subscriptions/${id}/run`, { method: "POST" });
+
+//  Whitelist (safe domains) 
+export interface WhitelistedDomain { id: number; domain: string; reason: string; created_at: string; updated_at: string; }
+export const getWhitelist = () => req<WhitelistedDomain[]>("/api/whitelist");
+export const addWhitelist = (d: { domain: string; reason: string }) => req<WhitelistedDomain>("/api/whitelist", { method: "POST", body: JSON.stringify(d) });
+export const deleteWhitelist = (id: number) => req<void>(`/api/whitelist/${id}`, { method: "DELETE" });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
