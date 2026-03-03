@@ -1,0 +1,89 @@
+# =============================================================================
+# TrustPositif — Caddyfile
+#
+# Required environment variables (set in .env / docker-compose):
+#   DOMAIN       Block-page + admin-panel domain   e.g. block.isp.example.com
+#   API_DOMAIN   Admin REST API domain              e.g. api.isp.example.com
+#   ACME_EMAIL   Let's Encrypt contact email        e.g. admin@example.com
+#
+# Port layout in Docker:
+#   :80   → Caddy catch-all (HTTP)
+#              • {$DOMAIN} / {$API_DOMAIN}  → 301 HTTPS redirect
+#              • every other host            → Go intercept server (dns:8081)
+#                 (subscriber browser was DNS-redirected here for a blocked site)
+#   :443  → Caddy HTTPS (TLS via Let's Encrypt)
+#              • {$DOMAIN}   → Next.js block page (web:3000)
+#              • {$API_DOMAIN} → Fiber admin API (dns:8080)
+#
+# For LOCAL dev without a real domain:
+#   Replace {$DOMAIN} with ":3000" and {$API_DOMAIN} with ":8080"
+#   and comment out the :80 block.
+# =============================================================================
+
+{
+	# Let's Encrypt — set ACME_EMAIL to a valid address.
+	email {$ACME_EMAIL}
+
+	# Uncomment while testing to avoid hitting LE rate limits:
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# ── HTTP catch-all (:80) ──────────────────────────────────────────────────────
+# Known hosts → 301 HTTPS; all others → Go intercept (blocked domain redirect).
+:80 {
+	@known host {$DOMAIN} {$API_DOMAIN}
+	redir @known https://{host}{uri} 301
+
+	# Subscriber's browser arrives here because DNS returned our IP for the
+	# blocked site.  The Go intercept read the Host header, looks up reason/
+	# category in the Redis cache, then issues a 302 to the HTTPS block page.
+	reverse_proxy dns:8081 {
+		header_up X-Real-IP        {remote_host}
+		header_up X-Forwarded-For  {remote_host}
+		header_up X-Forwarded-Host {host}
+	}
+}
+
+# ── Block page (Next.js :3000) ────────────────────────────────────────────────
+{$DOMAIN} {
+	reverse_proxy web:3000 {
+		header_up X-Real-IP        {remote_host}
+		header_up X-Forwarded-For  {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options    "nosniff"
+		X-Frame-Options           "SAMEORIGIN"
+		Referrer-Policy           "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	encode gzip
+	log
+}
+
+# ── Admin API (Fiber :8080) ───────────────────────────────────────────────────
+{$API_DOMAIN} {
+	reverse_proxy dns:8080 {
+		header_up X-Real-IP        {remote_host}
+		header_up X-Forwarded-For  {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# Optional: restrict admin routes to your management CIDR (uncomment & edit):
+	# @mgmt path /api/*
+	# handle @mgmt {
+	#   @denied not remote_ip 203.0.113.0/24
+	#   abort @denied
+	#   reverse_proxy dns:8080
+	# }
+
+	log
+}

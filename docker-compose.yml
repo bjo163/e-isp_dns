@@ -1,0 +1,121 @@
+﻿# -------------------------------------------------------------------------
+# TrustPositif -- Docker Compose
+#
+# Environment variables (copy .env.example -> .env and edit):
+#   DOMAIN       Block-page domain seen by subscribers  e.g. block.example.com
+#   API_DOMAIN   Admin API domain                       e.g. api.example.com
+#   ACME_EMAIL   Let's Encrypt contact email
+#   API_URL      Full HTTPS URL of admin API (baked into Next.js bundle)
+#                Defaults to https://${API_DOMAIN}
+#
+# Quick start:
+#   cp .env.example .env   # then edit at minimum DOMAIN, API_DOMAIN, ACME_EMAIL
+#   docker compose up -d --build
+#
+# Port layout (host):
+#   53/udp+tcp  DNS server (ISP recursive resolver)
+#   80          Caddy HTTP: HTTPS-redirect for known hosts; intercept for others
+#   443         Caddy HTTPS: block page + admin panel (auto TLS via Let's Encrypt)
+# -------------------------------------------------------------------------
+name: truspositif
+
+services:
+
+  # -- Redis ----------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: truspositif-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # -- Go DNS + Admin API ---------------------------------------------------
+  # Exposes:
+  #   :53      DNS (UDP+TCP) — open to the internet / ISP subscribers
+  #   :8080    Fiber admin API — internal only (Caddy → api.example.com)
+  #   :8081    HTTP intercept — internal only (Caddy :80 catch-all → dns:8081)
+  dns:
+    build:
+      context: ./dns
+      dockerfile: Dockerfile
+    container_name: truspositif-dns
+    restart: unless-stopped
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+      # 8080 and 8081 are intentionally NOT mapped to the host.
+      # Caddy reaches them via the internal Docker network.
+    volumes:
+      - dns-data:/app/data
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    cap_add:
+      - NET_BIND_SERVICE
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # -- Next.js Block Page + Admin Panel ------------------------------------
+  # Port 3000 is NOT exposed to the host; Caddy terminates TLS and proxies.
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        # Baked into the JS bundle at build time — must be browser-accessible.
+        NEXT_PUBLIC_API_URL: ${API_URL:-https://${API_DOMAIN:-api.example.com}}
+    container_name: truspositif-web
+    restart: unless-stopped
+    depends_on:
+      dns:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+
+  # -- Caddy reverse proxy + automatic TLS ----------------------------------
+  # Handles:
+  #   • Let's Encrypt certificate issuance and renewal (zero-config)
+  #   • HTTP → HTTPS redirect for {$DOMAIN} and {$API_DOMAIN}
+  #   • HTTP catch-all → Go intercept server (blocked domain detection)
+  #   • HTTPS → Next.js block page and Fiber admin API
+  caddy:
+    image: caddy:2-alpine
+    container_name: truspositif-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"           # HTTP (Let's Encrypt ACME HTTP-01 + catch-all intercept)
+      - "443:443"         # HTTPS (TLS)
+      - "443:443/udp"     # HTTP/3 (QUIC)
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data      # TLS certs persisted here
+      - caddy-config:/config  # Caddy runtime config
+    environment:
+      - DOMAIN=${DOMAIN:-block.example.com}
+      - API_DOMAIN=${API_DOMAIN:-api.example.com}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+    depends_on:
+      - dns
+      - web
+
+volumes:
+  dns-data:
+    driver: local
+  redis-data:
+    driver: local
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
