@@ -1,21 +1,21 @@
 ﻿# -------------------------------------------------------------------------
-# TrustPositif -- Docker Compose
+# TrustPositif -- Docker Compose  (host-network mode for LXC)
 #
-# Environment variables (copy .env.example -> .env and edit):
-#   DOMAIN       Block-page domain seen by subscribers  e.g. block.example.com
-#   API_DOMAIN   Admin API domain                       e.g. api.example.com
-#   ACME_EMAIL   Let's Encrypt contact email
-#   API_URL      Full HTTPS URL of admin API (baked into Next.js bundle)
-#                Defaults to https://${API_DOMAIN}
+# All services use network_mode: host so Docker never touches sysctl
+# (required for LXC containers that block ip_unprivileged_port_start).
+#
+# Port layout on the host:
+#   53/udp+tcp   Go DNS server
+#   80           Caddy HTTP (Let's Encrypt ACME + blocked-domain intercept)
+#   443          Caddy HTTPS (block page + admin API on one domain)
+#   3000         Next.js (internal, proxied by Caddy)
+#   6379         Redis (internal, localhost only)
+#   8080         Fiber admin API (internal, proxied by Caddy)
+#   8081         Go HTTP intercept (internal, proxied by Caddy :80)
 #
 # Quick start:
-#   cp .env.example .env   # then edit at minimum DOMAIN, API_DOMAIN, ACME_EMAIL
+#   cp .env.example .env   # edit DOMAIN, ACME_EMAIL, JWT_SECRET
 #   docker compose up -d --build
-#
-# Port layout (host):
-#   53/udp+tcp  DNS server (ISP recursive resolver)
-#   80          Caddy HTTP: HTTPS-redirect for known hosts; intercept for others
-#   443         Caddy HTTPS: block page + admin panel (auto TLS via Let's Encrypt)
 # -------------------------------------------------------------------------
 name: truspositif
 
@@ -26,7 +26,8 @@ services:
     image: redis:7-alpine
     container_name: truspositif-redis
     restart: unless-stopped
-    command: redis-server --save 60 1 --loglevel warning --maxmemory 128mb --maxmemory-policy allkeys-lru
+    network_mode: host
+    command: redis-server --save 60 1 --loglevel warning --maxmemory 128mb --maxmemory-policy allkeys-lru --bind 127.0.0.1
     volumes:
       - redis-data:/data
     healthcheck:
@@ -36,49 +37,38 @@ services:
       retries: 5
 
   # -- Go DNS + Admin API ---------------------------------------------------
-  # Exposes:
-  #   :53      DNS (UDP+TCP) — open to the internet / ISP subscribers
-  #   :8080    Fiber admin API — internal only (Caddy → api.example.com)
-  #   :8081    HTTP intercept — internal only (Caddy :80 catch-all → dns:8081)
   dns:
     build:
       context: ./dns
       dockerfile: Dockerfile
     container_name: truspositif-dns
     restart: unless-stopped
-    ports:
-      - "53:53/udp"
-      - "53:53/tcp"
-      # 8080 and 8081 are intentionally NOT mapped to the host.
-      # Caddy reaches them via the internal Docker network.
+    network_mode: host
     volumes:
       - dns-data:/app/data
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://127.0.0.1:6379/0
       - JWT_SECRET=${JWT_SECRET:-trustpositif-secret-change-in-prod}
     depends_on:
       redis:
         condition: service_healthy
-    # NOTE: cap_add NET_BIND_SERVICE removed — not supported in LXC.
-    # Container runs as root internally, so binding :53 works without it.
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 10s
 
   # -- Next.js Block Page + Admin Panel ------------------------------------
-  # Port 3000 is NOT exposed to the host; Caddy terminates TLS and proxies.
   web:
     build:
       context: ./web
       dockerfile: Dockerfile
       args:
-        # Baked into the JS bundle at build time — must be browser-accessible.
-        NEXT_PUBLIC_API_URL: ${API_URL:-https://${API_DOMAIN:-api.example.com}}
+        NEXT_PUBLIC_API_URL: ${API_URL:-https://${DOMAIN:-jahanam.mycocolink.com}}
     container_name: truspositif-web
     restart: unless-stopped
+    network_mode: host
     depends_on:
       dns:
         condition: service_healthy
@@ -86,27 +76,18 @@ services:
       - NODE_ENV=production
 
   # -- Caddy reverse proxy + automatic TLS ----------------------------------
-  # Handles:
-  #   • Let's Encrypt certificate issuance and renewal (zero-config)
-  #   • HTTP → HTTPS redirect for {$DOMAIN} and {$API_DOMAIN}
-  #   • HTTP catch-all → Go intercept server (blocked domain detection)
-  #   • HTTPS → Next.js block page and Fiber admin API
   caddy:
     image: caddy:2-alpine
     container_name: truspositif-caddy
     restart: unless-stopped
-    ports:
-      - "80:80"           # HTTP (Let's Encrypt ACME HTTP-01 + catch-all intercept)
-      - "443:443"         # HTTPS (TLS)
-      - "443:443/udp"     # HTTP/3 (QUIC)
+    network_mode: host
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data      # TLS certs persisted here
-      - caddy-config:/config  # Caddy runtime config
+      - caddy-data:/data
+      - caddy-config:/config
     environment:
-      - DOMAIN=${DOMAIN:-block.example.com}
-      - API_DOMAIN=${API_DOMAIN:-api.example.com}
-      - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+      - DOMAIN=${DOMAIN:-jahanam.mycocolink.com}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@mycocolink.com}
     depends_on:
       - dns
       - web
