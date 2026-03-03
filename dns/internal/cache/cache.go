@@ -1,9 +1,9 @@
 // Package cache provides a two-layer domain blocklist cache for production-grade
 // DNS performance, plus ACL and custom DNS record caches.
 //
-//   L1 — sync.RWMutex + map[string]struct{} (in-process, zero-allocation lookup)
-//   L2 — Redis SET  (shared across replicas; ~0.1 ms round-trip)
-//   L3 — SQLite     (source of truth, queried only on cold-start & cache miss)
+//	L1 — sync.RWMutex + map[string]struct{} (in-process, zero-allocation lookup)
+//	L2 — Redis SET  (shared across replicas; ~0.1 ms round-trip)
+//	L3 — SQLite     (source of truth, queried only on cold-start & cache miss)
 //
 // ACL cache: map[string]string — IP → "allow" or "block"
 // Records cache: map[recordKey][]recordVal — custom DNS records (A, AAAA, etc.)
@@ -50,8 +50,8 @@ var (
 	aclDefault = true // true = allow all by default
 
 	// Custom DNS records cache
-	recCache   map[recordKey][]RecordVal
-	recMu      sync.RWMutex
+	recCache map[recordKey][]RecordVal
+	recMu    sync.RWMutex
 )
 
 // recordKey is domain+type for custom record lookup.
@@ -141,10 +141,13 @@ func Reload(dbConn *gorm.DB) {
 	}
 
 	if pipe != nil && len(redisMems) > 0 {
-		// Replace the whole set atomically.
-		pipe.Del(ctx, rKeySet)
-		pipe.SAdd(ctx, rKeySet, redisMems...)
-		pipe.Expire(ctx, rKeySet, 24*time.Hour)
+		// Atomic swap: write to a temporary key, then RENAME to avoid
+		// a brief window where the set is empty (BUG-5 fix).
+		tmpKey := rKeySet + ":tmp"
+		pipe.Del(ctx, tmpKey)
+		pipe.SAdd(ctx, tmpKey, redisMems...)
+		pipe.Expire(ctx, tmpKey, 24*time.Hour)
+		pipe.Rename(ctx, tmpKey, rKeySet)
 		if _, err := pipe.Exec(ctx); err != nil {
 			log.Printf("cache: Redis pipeline error: %v", err)
 		}

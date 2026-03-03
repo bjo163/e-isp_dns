@@ -13,8 +13,8 @@ import (
 	"github.com/truspositif/dns/internal/intercept"
 	"github.com/truspositif/dns/internal/metrics"
 	"github.com/truspositif/dns/internal/models"
-	"github.com/truspositif/dns/internal/scheduler"
 	"github.com/truspositif/dns/internal/reputation"
+	"github.com/truspositif/dns/internal/scheduler"
 )
 
 func main() {
@@ -49,16 +49,16 @@ func main() {
 	metrics.StartSampler()
 	metrics.RunHub()
 
-	// Start IP reputation sync scheduler
+	// 6. Start IP reputation sync scheduler
 	reputation.Start(db.DB)
 
-	// 6. Start analytics persistence (query log → SQLite) + auto-purge
+	// 7. Start analytics persistence (query log → SQLite) + auto-purge
 	analytics.Start(db.DB)
 
-	// 7. Start blocklist subscription scheduler (60s tick)
+	// 8. Start blocklist subscription scheduler (60s tick)
 	scheduler.Start(db.DB)
 
-	// 8. Start Fiber HTTP admin API (non-blocking)
+	// 9. Start Fiber HTTP admin API (non-blocking)
 	app := api.New()
 	go func() {
 		addr := ":" + cfg.HTTPPort
@@ -68,12 +68,12 @@ func main() {
 		}
 	}()
 
-	// 6. Start HTTP intercept server on :80 — redirects blocked requests
-	//    from the browser to the block page with domain/reason/cat params.
+	// 10. Start HTTP intercept server — redirects blocked requests
+	//     from the browser to the block page with domain/reason/cat params.
 	intSrv := intercept.New(":"+cfg.InterceptPort, blockPageURL)
 	go intSrv.Start()
 
-	// 7. Start DNS server (blocks)
+	// 11. Start DNS server (blocks)
 	log.Printf("dns: starting on %s (upstream %s, redirect %s)", cfg.ListenAddr, cfg.UpstreamDNS, cfg.RedirectIP)
 	srv := dns.New(cfg.ListenAddr, cfg.UpstreamDNS, cfg.RedirectIP)
 	srv.Start()

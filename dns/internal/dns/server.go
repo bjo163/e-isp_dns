@@ -96,6 +96,7 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 			s.proxyAndRecord(w, r, start, domain, qtype, clientIP)
 			return
 		}
+		qtypeN := q.Qtype // capture for respondBlocked
 
 		// ── 3. ACL check — category-aware blocking
 		acl, aclFound := cache.GetClientACL(clientIP)
@@ -110,7 +111,7 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 			if len(acl.BlockedCategories) == 0 {
 				// No categories → block ALL DNS
 				metrics.IncBlocked()
-				s.respondBlocked(w, msg, q.Name, start, domain, qtype, clientIP, "acl_blocked")
+				s.respondBlocked(w, msg, q.Name, qtypeN, start, domain, qtype, clientIP, "acl_blocked")
 				return
 			}
 			// Has categories → only block matching domains
@@ -118,7 +119,7 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 				_, cat := cache.Lookup(domain)
 				if s.categoryMatch(cat, acl.BlockedCategories) {
 					metrics.IncBlocked()
-					s.respondBlocked(w, msg, q.Name, start, domain, qtype, clientIP, "blocked")
+					s.respondBlocked(w, msg, q.Name, qtypeN, start, domain, qtype, clientIP, "blocked")
 					return
 				}
 			}
@@ -132,29 +133,29 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		if !cache.GetACLDefault() {
 			// Default-deny — block all unknown clients
 			metrics.IncBlocked()
-			s.respondBlocked(w, msg, q.Name, start, domain, qtype, clientIP, "acl_blocked")
+			s.respondBlocked(w, msg, q.Name, qtypeN, start, domain, qtype, clientIP, "acl_blocked")
 			return
 		}
 
 		// ── 4. Domain blocklist check (default-allow + no ACL entry)
 		if s.isBlocked(domain) {
 			metrics.IncBlocked()
-			s.respondBlocked(w, msg, q.Name, start, domain, qtype, clientIP, "blocked")
+			s.respondBlocked(w, msg, q.Name, qtypeN, start, domain, qtype, clientIP, "blocked")
 			return
 		}
 	}
 
 	// Not blocked — forward upstream
 	metrics.IncForwarded()
-	domain := ""
-	qtype := "A"
+	qDomain := ""
+	qType := "A"
 	if len(r.Question) > 0 {
-		domain = trimDot(r.Question[0].Name)
+		qDomain = trimDot(r.Question[0].Name)
 		if t := dns.TypeToString[r.Question[0].Qtype]; t != "" {
-			qtype = t
+			qType = t
 		}
 	}
-	s.proxyAndRecord(w, r, start, domain, qtype, clientIP)
+	s.proxyAndRecord(w, r, start, qDomain, qType, clientIP)
 }
 
 // proxyAndRecord forwards upstream and records latency + query log.
@@ -168,18 +169,25 @@ func (s *Server) proxyAndRecord(w dns.ResponseWriter, r *dns.Msg, start time.Tim
 	})
 }
 
-// respondBlocked sends a redirect A record and logs the action.
-func (s *Server) respondBlocked(w dns.ResponseWriter, msg *dns.Msg, qname string, start time.Time, domain, qtype, clientIP, action string) {
-	rr := &dns.A{
-		Hdr: dns.RR_Header{Name: qname, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
-		A:   net.ParseIP(s.redirectIP).To4(),
+// respondBlocked sends a redirect record (A or AAAA) and logs the action.
+func (s *Server) respondBlocked(w dns.ResponseWriter, msg *dns.Msg, qname string, qtype uint16, start time.Time, domain, qtypeStr, clientIP, action string) {
+	if qtype == dns.TypeAAAA {
+		// For AAAA queries, respond with NODATA (empty answer) so dual-stack
+		// clients don't bypass the block by falling back to real AAAA upstream.
+		// SOA in authority signals "this name exists but has no AAAA".
+		msg.Authoritative = true
+	} else {
+		rr := &dns.A{
+			Hdr: dns.RR_Header{Name: qname, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+			A:   net.ParseIP(s.redirectIP).To4(),
+		}
+		msg.Answer = append(msg.Answer, rr)
 	}
-	msg.Answer = append(msg.Answer, rr)
 	latUs := time.Since(start).Microseconds()
 	metrics.RecordLatency(latUs)
 	w.WriteMsg(msg)
 	metrics.LogQuery(metrics.QueryLog{
-		Ts: time.Now().UnixMilli(), Domain: domain, QType: qtype,
+		Ts: time.Now().UnixMilli(), Domain: domain, QType: qtypeStr,
 		Action: action, LatencyUs: latUs, Client: clientIP,
 	})
 }
@@ -203,9 +211,11 @@ func (s *Server) isBlocked(domain string) bool {
 }
 
 // proxy forwards the query to the upstream DNS resolver.
+// Uses a shared client with a 5-second timeout to avoid goroutine leaks (P-5 fix).
+var upstreamClient = &dns.Client{Timeout: 5 * time.Second}
+
 func (s *Server) proxy(w dns.ResponseWriter, r *dns.Msg) {
-	c := new(dns.Client)
-	resp, _, err := c.Exchange(r, s.upstreamDNS)
+	resp, _, err := upstreamClient.Exchange(r, s.upstreamDNS)
 	if err != nil {
 		dns.HandleFailed(w, r)
 		return

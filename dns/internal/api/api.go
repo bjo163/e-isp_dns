@@ -1,9 +1,9 @@
-﻿
-package api
+﻿package api
 
 import (
 	"encoding/csv"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -27,8 +27,13 @@ import (
 func New() *fiber.App {
 	app := fiber.New(fiber.Config{AppName: "TrustPositif DNS Admin API"})
 	app.Use(logger.New())
+	// CORS: restrict to same-origin in production; allow * only via env override.
+	corsOrigin := os.Getenv("CORS_ORIGIN")
+	if corsOrigin == "" {
+		corsOrigin = "*" // dev default; set CORS_ORIGIN in production
+	}
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "*",
+		AllowOrigins: corsOrigin,
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
 		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
 	}))
@@ -108,9 +113,6 @@ func New() *fiber.App {
 	v1.Get("/querylog", handleQueryLog)
 	v1.Get("/ipinfo", handleIPInfo)
 	v1.Get("/reputation", handleReputation)
-
-
-
 
 	// Branding
 	v1.Get("/branding", getBranding)
@@ -380,10 +382,19 @@ func importDomains(c *fiber.Ctx) error {
 func listCategories(c *fiber.Ctx) error {
 	var cats []models.Category
 	db.DB.Order("name asc").Find(&cats)
+	// Single query for all category counts (P-2 fix: was N+1)
+	type catCount struct {
+		Category string
+		Cnt      int64
+	}
+	var counts []catCount
+	db.DB.Model(&models.BlockedDomain{}).Select("category, count(*) as cnt").Where("category != ''").Group("category").Scan(&counts)
+	countMap := make(map[string]int64, len(counts))
+	for _, cc := range counts {
+		countMap[cc.Category] = cc.Cnt
+	}
 	for i := range cats {
-		var cnt int64
-		db.DB.Model(&models.BlockedDomain{}).Where("category = ?", cats[i].Name).Count(&cnt)
-		cats[i].DomainCount = cnt
+		cats[i].DomainCount = countMap[cats[i].Name]
 	}
 	return c.JSON(cats)
 }

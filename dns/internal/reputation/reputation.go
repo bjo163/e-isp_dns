@@ -2,15 +2,18 @@ package reputation
 
 import (
 	"bufio"
+	"log"
 	"net"
 	"net/http"
 	"strings"
 	"time"
-	"log"
 
 	"github.com/truspositif/dns/internal/models"
 	"gorm.io/gorm"
 )
+
+// httpClient has a hard 30-second timeout to prevent goroutine leaks (BUG-3 fix).
+var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 // Default sources for IP reputation lists
 var defaultSources = []models.IPReputationSource{
@@ -24,7 +27,7 @@ var defaultSources = []models.IPReputationSource{
 	{Name: "Bruteforce Blocker", URL: "https://danger.rulez.sk/projects/bruteforceblocker/blist.php", Format: "ip", Enabled: true},
 }
 
-// Seed default sources if none exist
+// SeedSources inserts default sources if none exist.
 func SeedSources(db *gorm.DB) {
 	var count int64
 	db.Model(&models.IPReputationSource{}).Count(&count)
@@ -34,7 +37,7 @@ func SeedSources(db *gorm.DB) {
 	}
 }
 
-// Sync all enabled sources
+// Sync all enabled sources.
 func Sync(db *gorm.DB) {
 	var sources []models.IPReputationSource
 	db.Where("enabled = ?", true).Find(&sources)
@@ -52,18 +55,25 @@ func Sync(db *gorm.DB) {
 	}
 }
 
-// Fetch and parse a reputation list
-func fetchList(url, format string) (ips []string, cidrs []string) {
-	resp, err := http.Get(url)
+// fetchList downloads and parses a reputation list.
+// Uses httpClient with 30s timeout (BUG-3 fix).
+func fetchList(rawURL, format string) (ips []string, cidrs []string) {
+	resp, err := httpClient.Get(rawURL)
 	if err != nil {
-		log.Printf("reputation: fetch error %s: %v", url, err)
+		log.Printf("reputation: fetch error %s: %v", rawURL, err)
 		return
 	}
 	defer resp.Body.Close()
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") { continue }
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Strip inline comments (e.g. Spamhaus "1.2.3.0/24 ; SBLxxx")
+		if idx := strings.IndexByte(line, ';'); idx > 0 {
+			line = strings.TrimSpace(line[:idx])
+		}
 		if format == "ip" && net.ParseIP(line) != nil {
 			ips = append(ips, line)
 		} else if format == "cidr" && strings.Contains(line, "/") {
@@ -79,21 +89,27 @@ func fetchList(url, format string) (ips []string, cidrs []string) {
 	return
 }
 
-// Check if IP matches any reputation entry
+// Check if IP matches any reputation entry.
 func Check(db *gorm.DB, ip string) (matches []models.IPReputationEntry) {
+	// Exact IP match
 	db.Where("ip = ?", ip).Find(&matches)
+	// CIDR match — load once per call (better than per-request DB hit)
 	var cidrs []models.IPReputationEntry
 	db.Where("cidr != ''").Find(&cidrs)
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return
+	}
 	for _, entry := range cidrs {
 		_, netblock, err := net.ParseCIDR(entry.CIDR)
-		if err == nil && netblock.Contains(net.ParseIP(ip)) {
+		if err == nil && netblock.Contains(parsed) {
 			matches = append(matches, entry)
 		}
 	}
 	return
 }
 
-// Start reputation sync scheduler (every 24h)
+// Start reputation sync scheduler (every 24h).
 func Start(db *gorm.DB) {
 	SeedSources(db)
 	go func() {
