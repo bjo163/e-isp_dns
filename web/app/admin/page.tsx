@@ -35,23 +35,47 @@ type Toast = { id: number; msg: string; type: "ok" | "err" };
 let _tid = 0;
 
 //  Tabs (refactored)
-type Tab = "overview" | "blocklists" | "acl" | "querylog" | "blockpage" | "settings" | "domains" | "records" | "subscriptions" | "categories" | "clients" | "dns" | "security";
+type Tab = "overview" | "blocklists" | "querylog" | "blockpage" | "domains" | "records" | "subscriptions" | "categories" | "clients" | "dns" | "security";
 
-const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: "overview", label: "Overview", icon: <Radio className="w-3.5 h-3.5" /> },
-  { id: "domains", label: "Blocked Domains", icon: <Globe className="w-3.5 h-3.5" /> },
-  { id: "categories", label: "Kategori", icon: <Tags className="w-3.5 h-3.5" /> },
-  { id: "subscriptions", label: "Subscriptions", icon: <CalendarClock className="w-3.5 h-3.5" /> },
-  { id: "records", label: "DNS Records", icon: <Database className="w-3.5 h-3.5" /> },
-  { id: "clients", label: "Clients / ACL", icon: <Users className="w-3.5 h-3.5" /> },
-  { id: "blocklists", label: "Blocklists", icon: <ListFilter className="w-3.5 h-3.5" /> },
-  { id: "querylog", label: "Query Log", icon: <FileText className="w-3.5 h-3.5" /> },
-  { id: "blockpage", label: "Block Page", icon: <Shield className="w-3.5 h-3.5" /> },
-  { id: "dns", label: "DNS Config", icon: <Network className="w-3.5 h-3.5" /> },
-  { id: "acl", label: "Access Ctrl", icon: <Layers className="w-3.5 h-3.5" /> },
-  { id: "security", label: "Keamanan", icon: <Lock className="w-3.5 h-3.5" /> },
-  { id: "settings", label: "Settings", icon: <Server className="w-3.5 h-3.5" /> },
+type TabItem = { id: Tab; label: string; icon: React.ReactNode };
+type TabGroup = { section: string; items: TabItem[] };
+
+const TAB_GROUPS: TabGroup[] = [
+  {
+    section: "Monitoring",
+    items: [
+      { id: "overview", label: "Overview", icon: <Radio className="w-3.5 h-3.5" /> },
+      { id: "querylog", label: "Query Log", icon: <FileText className="w-3.5 h-3.5" /> },
+    ],
+  },
+  {
+    section: "Filtering",
+    items: [
+      { id: "domains", label: "Blocked Domains", icon: <Globe className="w-3.5 h-3.5" /> },
+      { id: "categories", label: "Kategori", icon: <Tags className="w-3.5 h-3.5" /> },
+      { id: "subscriptions", label: "Subscriptions", icon: <CalendarClock className="w-3.5 h-3.5" /> },
+      { id: "blocklists", label: "Blocklists", icon: <ListFilter className="w-3.5 h-3.5" /> },
+    ],
+  },
+  {
+    section: "Networking",
+    items: [
+      { id: "records", label: "DNS Records", icon: <Database className="w-3.5 h-3.5" /> },
+      { id: "clients", label: "Clients / ACL", icon: <Users className="w-3.5 h-3.5" /> },
+      { id: "dns", label: "DNS Config", icon: <Network className="w-3.5 h-3.5" /> },
+    ],
+  },
+  {
+    section: "System",
+    items: [
+      { id: "blockpage", label: "Block Page", icon: <Shield className="w-3.5 h-3.5" /> },
+      { id: "security", label: "Keamanan", icon: <Lock className="w-3.5 h-3.5" /> },
+    ],
+  },
 ];
+
+// Flat list for mobile tab bar
+const ALL_TABS = TAB_GROUPS.flatMap(g => g.items);
 
 //  Reusable Field 
 function Field({
@@ -492,15 +516,21 @@ export default function AdminPage() {
           <p className="px-4 text-[9px] font-bold tracking-[0.2em] uppercase mb-3" style={{ color: "var(--brand-muted)" }}>
             Navigasi
           </p>
-          {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              className="flex items-center gap-2.5 px-4 py-2.5 text-xs font-medium tracking-wide text-left transition-all relative"
-              style={{ color: tab === t.id ? "var(--foreground)" : "var(--brand-muted)", background: tab === t.id ? "rgba(239,68,68,0.07)" : "transparent" }}>
-              {tab === t.id && <span className="absolute left-0 top-1 bottom-1 w-0.5 rounded-r" style={{ background: "var(--brand-primary)" }} />}
-              {t.icon}
-              {t.label}
-              {/* No badge for domains/records tab: not present in TABS */}
-            </button>
+          {TAB_GROUPS.map(group => (
+            <div key={group.section} className="mb-2">
+              <p className="px-4 pt-2 pb-1 text-[8px] font-bold tracking-[0.2em] uppercase" style={{ color: "var(--brand-border)" }}>
+                {group.section}
+              </p>
+              {group.items.map(t => (
+                <button key={t.id} onClick={() => setTab(t.id)}
+                  className="flex items-center gap-2.5 px-4 py-2 text-xs font-medium tracking-wide text-left transition-all relative w-full"
+                  style={{ color: tab === t.id ? "var(--foreground)" : "var(--brand-muted)", background: tab === t.id ? "rgba(239,68,68,0.07)" : "transparent" }}>
+                  {tab === t.id && <span className="absolute left-0 top-1 bottom-1 w-0.5 rounded-r" style={{ background: "var(--brand-primary)" }} />}
+                  {t.icon}
+                  {t.label}
+                </button>
+              ))}
+            </div>
           ))}
 
           <div className="mt-auto px-4 pt-4 border-t" style={{ borderColor: "var(--brand-border)" }}>
@@ -515,7 +545,7 @@ export default function AdminPage() {
         {/* Mobile tab bar */}
         <div className="md:hidden flex overflow-x-auto border-b px-4 gap-0 shrink-0 w-full fixed bottom-0 z-40"
           style={{ background: "var(--brand-card-bg)", borderColor: "var(--brand-border)" }}>
-          {TABS.map(t => (
+          {ALL_TABS.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
               className="flex flex-col items-center gap-1 px-3 py-2.5 text-[8px] font-medium tracking-wide shrink-0 transition-colors border-t-2"
               style={{ color: tab === t.id ? "var(--brand-primary)" : "var(--brand-muted)", borderColor: tab === t.id ? "var(--brand-primary)" : "transparent" }}>
@@ -555,8 +585,7 @@ export default function AdminPage() {
               {/* BLOCKLISTS */}
               {tab === "blocklists" && <BlocklistsTab />}
 
-              {/* ACCESS CONTROL */}
-              {tab === "acl" && <AccessControlTab />}
+              {/* ACCESS CONTROL — merged into clients tab, removed standalone */}
 
               {/* QUERY LOG */}
               {tab === "querylog" && <QueryLogTab />}
@@ -564,8 +593,7 @@ export default function AdminPage() {
               {/* BLOCK PAGE */}
               {tab === "blockpage" && <BlockPageTab />}
 
-              {/* SETTINGS */}
-              {tab === "settings" && <SettingsTab />}
+              {/* SETTINGS — merged into DNS Config tab, removed standalone */}
 
               {/* Branding tab removed: not present in TABS */}
 
@@ -602,10 +630,13 @@ export default function AdminPage() {
                         onChange={e => setNewDomain(d => ({ ...d, domain: e.target.value }))} required
                         className="px-3 py-2 text-sm border rounded bg-transparent outline-none font-mono"
                         style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
-                      <input type="text" placeholder="Kategori" value={newDomain.category}
+                      <select value={newDomain.category}
                         onChange={e => setNewDomain(d => ({ ...d, category: e.target.value }))}
                         className="px-3 py-2 text-sm border rounded bg-transparent outline-none"
-                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }}>
+                        <option value="">Pilih Kategori</option>
+                        {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                      </select>
                       <input type="text" placeholder="Alasan" value={newDomain.reason}
                         onChange={e => setNewDomain(d => ({ ...d, reason: e.target.value }))}
                         className="px-3 py-2 text-sm border rounded bg-transparent outline-none"
@@ -634,10 +665,13 @@ export default function AdminPage() {
                       className="w-full px-3 py-2 text-sm border rounded bg-transparent outline-none font-mono"
                       style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
                     <div className="grid grid-cols-2 gap-3">
-                      <input type="text" placeholder="Kategori (opsional)" value={importCategory}
+                      <select value={importCategory}
                         onChange={e => setImportCategory(e.target.value)}
                         className="px-3 py-2 text-sm border rounded bg-transparent outline-none"
-                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }} />
+                        style={{ borderColor: "var(--brand-border)", color: "var(--foreground)" }}>
+                        <option value="">Pilih Kategori</option>
+                        {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                      </select>
                       <input type="text" placeholder="Alasan (opsional)" value={importReason}
                         onChange={e => setImportReason(e.target.value)}
                         className="px-3 py-2 text-sm border rounded bg-transparent outline-none"
