@@ -1,7 +1,10 @@
 package api
 
 import (
+	"encoding/json"
+	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/truspositif/dns/internal/db"
@@ -53,8 +56,50 @@ func handleIPInfo(c *fiber.Ctx) error {
 	if err == nil {
 		return c.JSON(info)
 	}
-	// TODO: Call external enrichment API (ipinfo.io, ip-api.com, etc), cache result
-	return c.Status(404).JSON(fiber.Map{"error": "not found"})
+
+	// Fetch from external API
+	resp, err := http.Get("http://ip-api.com/json/" + ip + "?fields=status,message,country,countryCode,city,isp,as,org,lat,lon")
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "failed to fetch from external API"})
+	}
+	defer resp.Body.Close()
+
+	var apiRes struct {
+		Status      string  `json:"status"`
+		Message     string  `json:"message"`
+		Country     string  `json:"country"`
+		CountryCode string  `json:"countryCode"`
+		City        string  `json:"city"`
+		ISP         string  `json:"isp"`
+		AS          string  `json:"as"`
+		Org         string  `json:"org"`
+		Lat         float64 `json:"lat"`
+		Lon         float64 `json:"lon"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&apiRes); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "failed to decode API response"})
+	}
+
+	if apiRes.Status != "success" {
+		return c.Status(404).JSON(fiber.Map{"error": apiRes.Message})
+	}
+
+	// Map and cache
+	info = models.IPEnrichment{
+		IP:          ip,
+		ISP:         apiRes.ISP,
+		Org:         apiRes.Org,
+		ASN:         apiRes.AS,
+		Country:     apiRes.Country,
+		CountryCode: apiRes.CountryCode,
+		City:        apiRes.City,
+		Lat:         apiRes.Lat,
+		Lon:         apiRes.Lon,
+		FetchedAt:   time.Now(),
+	}
+	db.DB.Create(&info)
+
+	return c.JSON(info)
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
