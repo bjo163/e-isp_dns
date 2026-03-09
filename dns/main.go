@@ -4,6 +4,8 @@ import (
 	"flag"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/truspositif/dns/internal/analytics"
 	"github.com/truspositif/dns/internal/api"
@@ -18,6 +20,17 @@ import (
 )
 
 func main() {
+	// 0. Validate Critical Environment Variables
+	if os.Getenv("JWT_SECRET") == "" {
+		log.Fatal("FATAL: JWT_SECRET environment variable is not set. Application cannot start securely.")
+	}
+	if os.Getenv("JWT_SECRET") == "secret" || os.Getenv("JWT_SECRET") == "changeme" {
+		log.Println("WARNING: JWT_SECRET is set to a default value. Please change this in production!")
+	}
+	if os.Getenv("REDIS_URL") == "" {
+		log.Println("WARNING: REDIS_URL is not set. Application will run in standalone mode (L1 cache only).")
+	}
+
 	dbPath := flag.String("db", "data/trustpositif.db", "Path to SQLite database file")
 	flag.Parse()
 
@@ -76,6 +89,24 @@ func main() {
 	intSrv := intercept.New(":"+cfg.InterceptPort, blockPageURL)
 	go intSrv.Start()
 
-	// 11b. Run DNS server (blocking)
-	srv.Start()
+	// 11b. Run DNS server in a goroutine
+	go srv.Start()
+
+	// 12. Graceful Shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down servers...")
+
+	// Close database connection
+	if sqlDB, err := db.DB.DB(); err == nil {
+		sqlDB.Close()
+	}
+
+	// Fiber shutdown
+	if err := app.Shutdown(); err != nil {
+		log.Printf("Server forced to shutdown: %v", err)
+	}
+
+	log.Println("Server exiting")
 }

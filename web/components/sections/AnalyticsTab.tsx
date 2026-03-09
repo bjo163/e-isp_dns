@@ -5,6 +5,7 @@ import {
   BarChart, Bar, AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
 import { RefreshCw, XCircle, TrendingUp, ShieldAlert, Globe, Users } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   getAnalyticsSummary, getTopBlocked, getTopClients, getHistory, getClientStats,
   type AnalyticsSummary, type TopEntry, type HistoryBucket, type ClientStat,
@@ -111,7 +112,13 @@ export function AnalyticsTab() {
       </div>
 
       {/* Summary cards */}
-      {summary && (
+      {loading ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <Skeleton key={i} className="h-24 rounded-lg" />
+          ))}
+        </div>
+      ) : summary && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: "Total Query", value: summary.total_queries.toLocaleString(), icon: <TrendingUp className="w-4 h-4" />, color: "#6366f1" },
@@ -132,7 +139,9 @@ export function AnalyticsTab() {
       )}
 
       {/* History chart */}
-      {chartData.length > 0 && (
+      {loading ? (
+        <Skeleton className="h-[280px] w-full rounded-lg" />
+      ) : chartData.length > 0 && (
         <div className="border rounded p-5" style={{ borderColor: "var(--brand-border)", background: "var(--brand-card-bg)" }}>
           <p className="text-[10px] font-bold tracking-[0.15em] uppercase mb-4" style={{ color: "var(--brand-muted)" }}>
             Query History
@@ -156,39 +165,47 @@ export function AnalyticsTab() {
       {/* Top tables side by side */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Top Blocked */}
-        <div className="border rounded overflow-hidden" style={{ borderColor: "var(--brand-border)" }}>
-          <div className="px-4 py-3 border-b" style={{ borderColor: "var(--brand-border)", background: "var(--brand-card-bg)" }}>
-            <p className="text-[10px] font-bold tracking-[0.15em] uppercase" style={{ color: "var(--brand-muted)" }}>Top Blocked Domains</p>
-          </div>
-          {topBlocked.length === 0 ? (
-            <div className="px-4 py-10 text-center text-xs" style={{ color: "var(--brand-muted)" }}>Belum ada data</div>
-          ) : topBlocked.map((e, i) => (
-            <div key={e.name} className="flex items-center gap-3 px-4 py-2.5 border-b last:border-0"
-              style={{ borderColor: "var(--brand-border)" }}>
-              <span className="text-[10px] font-mono w-5 text-right" style={{ color: "var(--brand-muted)" }}>{i + 1}</span>
-              <span className="flex-1 text-xs font-mono truncate">{e.name}</span>
-              <span className="text-xs font-mono tabular-nums" style={{ color: "#ef4444" }}>{e.count.toLocaleString()}</span>
+        {loading ? (
+          <Skeleton className="h-[300px] w-full rounded-lg" />
+        ) : (
+          <div className="border rounded overflow-hidden" style={{ borderColor: "var(--brand-border)" }}>
+            <div className="px-4 py-3 border-b" style={{ borderColor: "var(--brand-border)", background: "var(--brand-card-bg)" }}>
+              <p className="text-[10px] font-bold tracking-[0.15em] uppercase" style={{ color: "var(--brand-muted)" }}>Top Blocked Domains</p>
             </div>
-          ))}
-        </div>
+            {topBlocked.length === 0 ? (
+              <div className="px-4 py-10 text-center text-xs" style={{ color: "var(--brand-muted)" }}>Belum ada data</div>
+            ) : topBlocked.map((e, i) => (
+              <div key={e.name} className="flex items-center gap-3 px-4 py-2.5 border-b last:border-0"
+                style={{ borderColor: "var(--brand-border)" }}>
+                <span className="text-[10px] font-mono w-5 text-right" style={{ color: "var(--brand-muted)" }}>{i + 1}</span>
+                <span className="flex-1 text-xs font-mono truncate">{e.name}</span>
+                <span className="text-xs font-mono tabular-nums" style={{ color: "#ef4444" }}>{e.count.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Top Clients */}
-        <div className="border rounded overflow-hidden" style={{ borderColor: "var(--brand-border)" }}>
-          <div className="px-4 py-3 border-b" style={{ borderColor: "var(--brand-border)", background: "var(--brand-card-bg)" }}>
-            <p className="text-[10px] font-bold tracking-[0.15em] uppercase" style={{ color: "var(--brand-muted)" }}>Top Clients</p>
-          </div>
-          {topClients.length === 0 ? (
-            <div className="px-4 py-10 text-center text-xs" style={{ color: "var(--brand-muted)" }}>Belum ada data</div>
-          ) : topClients.map((e, i) => (
-            <div key={e.name} className="flex items-center gap-3 px-4 py-2.5 border-b last:border-0 cursor-pointer hover:bg-white/[0.02]"
-              style={{ borderColor: "var(--brand-border)" }}
-              onClick={() => openClientStats(e.name)}>
-              <span className="text-[10px] font-mono w-5 text-right" style={{ color: "var(--brand-muted)" }}>{i + 1}</span>
-              <span className="flex-1 text-xs font-mono truncate">{e.name}</span>
-              <span className="text-xs font-mono tabular-nums" style={{ color: "#6366f1" }}>{e.count.toLocaleString()}</span>
+        {loading ? (
+          <Skeleton className="h-[300px] w-full rounded-lg" />
+        ) : (
+          <div className="border rounded overflow-hidden" style={{ borderColor: "var(--brand-border)" }}>
+            <div className="px-4 py-3 border-b" style={{ borderColor: "var(--brand-border)", background: "var(--brand-card-bg)" }}>
+              <p className="text-[10px] font-bold tracking-[0.15em] uppercase" style={{ color: "var(--brand-muted)" }}>Top Clients</p>
             </div>
-          ))}
-        </div>
+            {topClients.length === 0 ? (
+              <div className="px-4 py-10 text-center text-xs" style={{ color: "var(--brand-muted)" }}>Belum ada data</div>
+            ) : topClients.map((e, i) => (
+              <div key={e.name} className="flex items-center gap-3 px-4 py-2.5 border-b last:border-0 cursor-pointer hover:bg-white/[0.02]"
+                style={{ borderColor: "var(--brand-border)" }}
+                onClick={() => openClientStats(e.name)}>
+                <span className="text-[10px] font-mono w-5 text-right" style={{ color: "var(--brand-muted)" }}>{i + 1}</span>
+                <span className="flex-1 text-xs font-mono truncate">{e.name}</span>
+                <span className="text-xs font-mono tabular-nums" style={{ color: "#6366f1" }}>{e.count.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Per-client stats panel */}

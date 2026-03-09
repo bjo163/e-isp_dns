@@ -10,6 +10,8 @@ import (
 	"github.com/miekg/dns"
 	"github.com/truspositif/dns/internal/cache"
 	"github.com/truspositif/dns/internal/metrics"
+	gocache "github.com/patrickmn/go-cache"
+	"golang.org/x/sync/singleflight"
 )
 
 // Server wraps a miekg/dns server instance.
@@ -17,6 +19,8 @@ type Server struct {
 	listenAddr  string
 	upstreamDNS string
 	redirectIP  string
+	respCache   *gocache.Cache
+	sfGroup     singleflight.Group
 }
 
 func New(listenAddr, upstreamDNS, redirectIP string) *Server {
@@ -24,6 +28,7 @@ func New(listenAddr, upstreamDNS, redirectIP string) *Server {
 		listenAddr:  listenAddr,
 		upstreamDNS: upstreamDNS,
 		redirectIP:  redirectIP,
+		respCache:   gocache.New(5*time.Minute, 10*time.Minute),
 	}
 }
 
@@ -156,8 +161,65 @@ func (s *Server) Resolve(r *dns.Msg, clientIP string) *dns.Msg {
 	return s.proxyAndRecord(r, start, qDomain, qType, clientIP)
 }
 
+// proxyAndRecord forwards the query to upstream, records metrics, and caches the response.
 func (s *Server) proxyAndRecord(r *dns.Msg, start time.Time, domain, qtype, clientIP string) *dns.Msg {
-	resp := s.proxy(r)
+	// Check cache first
+	cacheKey := fmt.Sprintf("%s:%d", domain, r.Question[0].Qtype)
+	if val, found := s.respCache.Get(cacheKey); found {
+		if cachedMsg, ok := val.(*dns.Msg); ok {
+			// Copy cached message to avoid race conditions
+			resp := cachedMsg.Copy()
+			// Set the ID to match the current request
+			resp.Id = r.Id
+			// Restore the question section from the current request (optional but good practice)
+			resp.Question = r.Question
+			
+			metrics.RecordLatency(0) // Instant
+			metrics.LogQuery(metrics.QueryLog{
+				Ts: time.Now().UnixMilli(), Domain: domain, QType: qtype,
+				Action: "cache_hit", LatencyUs: 0, Client: clientIP,
+			})
+			return resp
+		}
+	}
+
+	// SingleFlight to prevent cache stampede
+	val, err, _ := s.sfGroup.Do(cacheKey, func() (interface{}, error) {
+		// Double-check cache inside singleflight
+		if val, found := s.respCache.Get(cacheKey); found {
+			return val, nil
+		}
+		
+		resp := s.proxy(r)
+		
+		// Cache successful response if TTL > 0
+		if resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
+			minTTL := uint32(3600)
+			for _, ans := range resp.Answer {
+				if ans.Header().Ttl < minTTL {
+					minTTL = ans.Header().Ttl
+				}
+			}
+			if minTTL > 0 {
+				// Store a copy to avoid mutation issues if the cached object is modified later
+				cachedMsg := resp.Copy()
+				s.respCache.Set(cacheKey, cachedMsg, time.Duration(minTTL)*time.Second)
+			}
+		}
+		return resp, nil
+	})
+	
+	if err != nil {
+		// Fallback if singleflight fails (should not happen normally)
+		m := new(dns.Msg)
+		m.SetRcode(r, dns.RcodeServerFailure)
+		return m
+	}
+
+	resp := val.(*dns.Msg).Copy()
+	resp.Id = r.Id
+	resp.Question = r.Question
+
 	latUs := time.Since(start).Microseconds()
 	metrics.RecordLatency(latUs)
 	metrics.LogQuery(metrics.QueryLog{

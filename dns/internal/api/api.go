@@ -279,6 +279,7 @@ func updateBranding(c *fiber.Ctx) error {
 	}
 	RecordAuditLog(c, "Update Branding", "System", "Admin updated branding configuration")
 	go cache.ReloadBranding(db.DB)
+	go cache.PublishReload("branding")
 	return c.JSON(payload)
 }
 
@@ -340,6 +341,7 @@ func addDomain(c *fiber.Ctx) error {
 	}
 	RecordAuditLog(c, "Add Domain", d.Domain, fmt.Sprintf("Category: %s", d.Category))
 	go cache.Reload(db.DB)
+	go cache.PublishReload("domains")
 	return c.Status(201).JSON(d)
 }
 
@@ -357,6 +359,7 @@ func updateDomain(c *fiber.Ctx) error {
 	}
 	RecordAuditLog(c, "Update Domain", d.Domain, "Updated domain settings")
 	go cache.Reload(db.DB)
+	go cache.PublishReload("domains")
 	return c.JSON(d)
 }
 
@@ -369,6 +372,7 @@ func deleteDomain(c *fiber.Ctx) error {
 	}
 	RecordAuditLog(c, "Delete Domain", d.Domain, "")
 	go cache.Reload(db.DB)
+	go cache.PublishReload("domains")
 	return c.SendStatus(204)
 }
 
@@ -382,6 +386,7 @@ func bulkDeleteDomains(c *fiber.Ctx) error {
 	result := db.DB.Where("id IN ?", body.IDs).Delete(&models.BlockedDomain{})
 	RecordAuditLog(c, "Bulk Delete Domains", fmt.Sprintf("%d domains", result.RowsAffected), "")
 	go cache.Reload(db.DB)
+	go cache.PublishReload("domains")
 	return c.JSON(fiber.Map{"deleted": result.RowsAffected})
 }
 
@@ -465,6 +470,7 @@ func updateCategory(c *fiber.Ctx) error {
 		db.DB.Model(&models.BlockedDomain{}).Where("category = ?", oldName).Update("category", cat.Name)
 	}
 	go cache.Reload(db.DB)
+	go cache.PublishReload("domains")
 	return c.JSON(cat)
 }
 
@@ -532,6 +538,7 @@ func addClient(c *fiber.Ctx) error {
 	}
 	RecordAuditLog(c, "Add Client", cl.IP, fmt.Sprintf("Name: %s", cl.Name))
 	go cache.ReloadACL(db.DB)
+	go cache.PublishReload("acl")
 	return c.Status(201).JSON(cl)
 }
 
@@ -549,6 +556,7 @@ func updateClient(c *fiber.Ctx) error {
 	}
 	RecordAuditLog(c, "Update Client", cl.IP, fmt.Sprintf("Name: %s", cl.Name))
 	go cache.ReloadACL(db.DB)
+	go cache.PublishReload("acl")
 	return c.JSON(cl)
 }
 
@@ -561,6 +569,7 @@ func deleteClient(c *fiber.Ctx) error {
 	}
 	RecordAuditLog(c, "Delete Client", cl.IP, "")
 	go cache.ReloadACL(db.DB)
+	go cache.PublishReload("acl")
 	return c.SendStatus(204)
 }
 
@@ -624,6 +633,7 @@ func addRecord(c *fiber.Ctx) error {
 	}
 	RecordAuditLog(c, "Add DNS Record", r.Name, fmt.Sprintf("%s -> %s", r.Type, r.Value))
 	go cache.ReloadRecords(db.DB)
+	go cache.PublishReload("records")
 	return c.Status(201).JSON(r)
 }
 
@@ -642,6 +652,7 @@ func updateRecord(c *fiber.Ctx) error {
 	}
 	RecordAuditLog(c, "Update DNS Record", r.Name, fmt.Sprintf("%s -> %s", r.Type, r.Value))
 	go cache.ReloadRecords(db.DB)
+	go cache.PublishReload("records")
 	return c.JSON(r)
 }
 
@@ -654,6 +665,7 @@ func deleteRecord(c *fiber.Ctx) error {
 	}
 	RecordAuditLog(c, "Delete DNS Record", r.Name, "")
 	go cache.ReloadRecords(db.DB)
+	go cache.PublishReload("records")
 	return c.SendStatus(204)
 }
 
@@ -703,6 +715,7 @@ func updateDNSConfig(c *fiber.Ctx) error {
 	RecordAuditLog(c, "Update DNS Config", "System", "Admin updated DNS configuration")
 	// Update ACL default policy from config
 	cache.SetACLDefault(cfg.ACLDefaultAllow)
+	go cache.PublishReload("acl") // Trigger reload for replicas
 	return c.JSON(cfg)
 }
 
@@ -898,6 +911,7 @@ func addWhitelist(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 	cache.ReloadWhitelist(db.DB)
+	go cache.PublishReload("whitelist")
 	return c.Status(201).JSON(item)
 }
 
@@ -910,5 +924,6 @@ func deleteWhitelist(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 	cache.ReloadWhitelist(db.DB)
+	go cache.PublishReload("whitelist")
 	return c.SendStatus(204)
 }

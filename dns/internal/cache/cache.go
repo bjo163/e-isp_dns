@@ -30,6 +30,8 @@ const (
 	// Redis key prefix for domain metadata: reason + category.
 	// e.g. tp:meta:example.com → "Pornografi|Konten Terlarang"
 	rKeyMeta = "tp:meta:"
+	// Redis channel for cache reload events
+	rChannelReload = "tp:reload"
 )
 
 var (
@@ -99,6 +101,7 @@ func Init(redisURL string, dbConn *gorm.DB) {
 				rdb = nil
 			} else {
 				log.Printf("cache: Redis connected at %s", redisURL)
+				go subscribeToUpdates(dbConn)
 			}
 		}
 	} else {
@@ -173,6 +176,45 @@ func Reload(dbConn *gorm.DB) {
 
 	metrics.SetBlockedDomains(uint64(len(rows)))
 	log.Printf("cache: loaded %d active domains", len(rows))
+}
+
+// subscribeToUpdates listens to Redis Pub/Sub for reload events.
+func subscribeToUpdates(dbConn *gorm.DB) {
+	if rdb == nil {
+		return
+	}
+	pubsub := rdb.Subscribe(ctx, rChannelReload)
+	defer pubsub.Close()
+
+	ch := pubsub.Channel()
+	for msg := range ch {
+		log.Printf("cache: received reload event: %s", msg.Payload)
+		switch msg.Payload {
+		case "domains":
+			Reload(dbConn)
+		case "whitelist":
+			ReloadWhitelist(dbConn)
+		case "acl":
+			ReloadACL(dbConn)
+		case "records":
+			ReloadRecords(dbConn)
+		case "branding":
+			ReloadBranding(dbConn)
+		case "all":
+			Reload(dbConn)
+			ReloadWhitelist(dbConn)
+			ReloadACL(dbConn)
+			ReloadRecords(dbConn)
+			ReloadBranding(dbConn)
+		}
+	}
+}
+
+// PublishReload sends a reload signal to all replicas.
+func PublishReload(event string) {
+	if rdb != nil {
+		rdb.Publish(ctx, rChannelReload, event)
+	}
 }
 
 // ReloadWhitelist rebuilds the whitelist cache from DB.
